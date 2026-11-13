@@ -5939,25 +5939,112 @@
       toggleScreenShare();
     });
 
+    async function leaveStudentSession() {
+      // 1. Desconectar LiveKit Room si está activa
+      if (typeof livekitRoom !== 'undefined' && livekitRoom) {
+        try {
+          await livekitRoom.disconnect();
+        } catch (err) {
+          console.warn('[LiveKit] Error al desconectar sala:', err);
+        }
+        livekitRoom = null;
+      }
+
+      // 2. Notificar salida y desuscribirse del canal de Supabase
+      if (typeof myChannel !== 'undefined' && myChannel) {
+        try {
+          await myChannel.send({
+            type: 'broadcast',
+            event: 'WEBRTC_LEAVE',
+            payload: { peerId: webrtcPeerId, name: getMyDisplayNameForWebRTC(), role: 'student' }
+          });
+          await myChannel.untrack();
+        } catch (e) {}
+        try {
+          myChannel.unsubscribe();
+        } catch (e) {}
+        myChannel = null;
+      }
+
+      // 3. Detener pistas de pantalla compartida si existían
+      if (typeof screenStream !== 'undefined' && screenStream) {
+        try {
+          screenStream.getTracks().forEach(t => t.stop());
+        } catch (e) {}
+        screenStream = null;
+      }
+
+      // 4. Limpiar intervalos activos
+      if (typeof waitingRoomPingInterval !== 'undefined' && waitingRoomPingInterval) {
+        clearInterval(waitingRoomPingInterval);
+        waitingRoomPingInterval = null;
+      }
+
+      // 5. Restablecer banderas de estado de la sala
+      isAdmittedToClass = false;
+      currentRoomPin = null;
+      webrtcAudioEnabled = false;
+      webrtcVideoEnabled = false;
+      isSharingScreen = false;
+      window.__remoteScreenSharingActive = false;
+
+      // 6. Limpiar elementos de video/audio del DOM
+      const localVideo = document.getElementById('webrtcLocalVideo');
+      if (localVideo) {
+        localVideo.srcObject = null;
+        localVideo.classList.add('hidden');
+      }
+      const localPlaceholder = document.getElementById('webrtcLocalPlaceholder');
+      if (localPlaceholder) {
+        localPlaceholder.classList.remove('hidden');
+      }
+
+      const stageVideo = document.getElementById('remoteScreenShareVideo');
+      if (stageVideo) {
+        stageVideo.srcObject = null;
+      }
+      const stageOverlay = document.getElementById('remoteScreenShareOverlay');
+      if (stageOverlay) {
+        stageOverlay.classList.add('hidden');
+        stageOverlay.classList.remove('flex');
+      }
+
+      const remoteCards = document.getElementById('webrtcRemoteCards');
+      if (remoteCards) {
+        remoteCards.innerHTML = '';
+      }
+      const strip = document.getElementById('webrtcVideoStrip');
+      if (strip) {
+        strip.querySelectorAll('[data-peer-id]').forEach(el => el.remove());
+      }
+      document.querySelectorAll('audio[data-livekit-participant]').forEach(a => a.remove());
+
+      if (typeof webrtcPeers === 'object' && webrtcPeers) {
+        Object.keys(webrtcPeers).forEach(k => delete webrtcPeers[k]);
+      }
+
+      if (typeof updateLocalMediaUI === 'function') {
+        updateLocalMediaUI();
+      }
+
+      // 7. Regresar limpiamente a la pantalla inicial de ingreso por PIN
+      document.getElementById('liveScreen')?.classList.add('hidden');
+      document.getElementById('waitingRoomScreen')?.classList.add('hidden');
+      document.getElementById('joinScreen')?.classList.remove('hidden');
+
+      const pinInput = document.getElementById('roomPinInput');
+      if (pinInput) {
+        pinInput.value = '';
+        pinInput.focus();
+      }
+      try {
+        localStorage.removeItem('elt_student_pin');
+      } catch (e) {}
+    }
+
     document.getElementById('bottomEndBtn')?.addEventListener('click', async () => {
       if (confirm('¿Deseas salir de la sesión en vivo?')) {
-        if (myChannel) {
-          try {
-            await myChannel.send({
-              type: 'broadcast',
-              event: 'WEBRTC_LEAVE',
-              payload: { peerId: webrtcPeerId, name: getMyDisplayNameForWebRTC(), role: 'student' }
-            });
-            await myChannel.untrack();
-          } catch (e) {}
-        }
-        if (screenStream) {
-          screenStream.getTracks().forEach(t => t.stop());
-        }
-        if (webrtcLocalStream) {
-          webrtcLocalStream.getTracks().forEach(t => t.stop());
-        }
-        window.location.reload();
+        await leaveStudentSession();
       }
     });
 
