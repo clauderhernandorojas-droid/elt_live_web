@@ -1,44 +1,18 @@
 {
-  "name": "elt-live",
+  "name": "elt-live-web",
   "version": "1.0.0",
-  "description": "ELT Live — Centro de Mando Docente y Aula Virtual",
-  "main": "main-host.js",
+  "description": "ELT Live — Aula Virtual para Estudiantes (Web)",
+  "private": true,
   "scripts": {
-    "start": "electron .",
-    "start:host": "electron main-host.js",
-    "start:student": "electron main-student.js",
-    "start:agenda": "electron main-agenda.js",
-    "build:win": "electron-builder --win --x64",
-    "build:host": "electron-builder --win --x64 -c.extraMetadata.main=main-host.js -c.productName=\"ELT Live Host\" -c.appId=com.eltlive.host -c.artifactName=\"ELT-Live-Host-Setup-${version}.${ext}\"",
-    "build:student": "electron-builder --win --x64 -c.extraMetadata.main=main-student.js -c.productName=\"ELT Live Student\" -c.appId=com.eltlive.student -c.artifactName=\"ELT-Live-Student-Setup-${version}.${ext}\"",
-    "build:agenda": "electron-builder --win --x64 -c.extraMetadata.main=main-agenda.js -c.productName=\"ELT Live Agenda\" -c.appId=com.eltlive.agenda -c.artifactName=\"ELT-Live-Agenda-Setup-${version}.${ext}\""
+    "build": "echo 'ELT Live Web build ready'"
   },
   "keywords": [
     "elt-live",
     "videoconference",
     "education",
-    "electron"
+    "student",
+    "web"
   ],
   "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
-  },
-  "build": {
-    "appId": "com.eltlive.app",
-    "productName": "ELT Live",
-    "directories": {
-      "output": "dist"
-    },
-    "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
-    },
-    "icon": "assets/icon.ico",
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
-  }
+  "license": "ISC"
 }

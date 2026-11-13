@@ -2,8 +2,13 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>ELT Live — Estudiante</title>
+  <link rel="icon" type="image/x-icon" href="assets/icon.ico">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#020617">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -15,6 +20,28 @@
       padding: 0;
       overflow: hidden;
       background-color: #020617;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #wbViewport, #wbCanvas {
+      touch-action: none;
+    }
+    @media (max-width: 768px) {
+      #zmChatDockSlot {
+        position: absolute !important;
+        right: 0 !important;
+        top: 0 !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        max-width: 100vw !important;
+        z-index: 70 !important;
+        box-shadow: -4px 0 25px rgba(0, 0, 0, 0.6);
+      }
+      #zmChatDockResizeLeft {
+        display: none !important;
+      }
+      #webrtcVideoStrip {
+        max-width: 95% !important;
+      }
     }
     .wb-dot-grid {
       background-color: #f5f6f8;
@@ -3126,6 +3153,63 @@
       setWbZoomAtPoint(wbZoom * factor, e.clientX, e.clientY);
     }, { passive: false });
 
+    // Soporte táctil completo para celulares y tablets en la Pizarra Blanca
+    (function enableWhiteboardTouchSupport() {
+      if (!wbViewport) return;
+
+      function dispatchSimulatedMouseEvent(touch, type, button = 0) {
+        const mouseEv = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+          screenX: touch.screenX,
+          screenY: touch.screenY,
+          button: button,
+          buttons: type === 'mouseup' ? 0 : 1
+        });
+        touch.target.dispatchEvent(mouseEv);
+      }
+
+      let activeTouchId = null;
+
+      wbViewport.addEventListener('touchstart', (e) => {
+        if (e.target.closest('button, input, select, textarea, [data-interactive], .wb-minimap')) return;
+        if (e.touches.length === 1 && activeTouchId === null) {
+          const t = e.touches[0];
+          activeTouchId = t.identifier;
+          e.preventDefault();
+          dispatchSimulatedMouseEvent(t, 'mousedown', 0);
+        }
+      }, { passive: false });
+
+      window.addEventListener('touchmove', (e) => {
+        if (activeTouchId === null) return;
+        for (let i = 0; i < e.touches.length; i++) {
+          if (e.touches[i].identifier === activeTouchId) {
+            e.preventDefault();
+            dispatchSimulatedMouseEvent(e.touches[i], 'mousemove', 0);
+            break;
+          }
+        }
+      }, { passive: false });
+
+      const handleTouchEnd = (e) => {
+        if (activeTouchId === null) return;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === activeTouchId) {
+            activeTouchId = null;
+            dispatchSimulatedMouseEvent(e.changedTouches[i], 'mouseup', 0);
+            break;
+          }
+        }
+      };
+
+      window.addEventListener('touchend', handleTouchEnd, { passive: true });
+      window.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+    })();
+
     document.querySelectorAll('.wb-tool-btn[data-tool]').forEach(btn => {
       btn.addEventListener('click', () => {
         const t = btn.dataset.tool;
@@ -3480,7 +3564,7 @@
     let zmPendingAttachment = null;
     let zmIsFloating = false;
     let zmIsMinimized = false;
-    let zmIsHidden = false;
+    let zmIsHidden = (window.innerWidth < 768);
     let zmUnreadCount = 0;
 
     let zmContextState = {
@@ -5924,6 +6008,53 @@
         isDragging = false;
         strip.classList.remove('ring-2', 'ring-indigo-500/60', 'shadow-indigo-950/60');
       });
+
+      // Soporte táctil en dispositivos móviles para mover la miniatura de cámaras
+      strip.addEventListener('touchstart', (e) => {
+        if (e.target.closest('button')) return;
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          const cRect = container.getBoundingClientRect();
+          const sRect = strip.getBoundingClientRect();
+
+          strip.style.bottom = 'auto';
+          strip.style.right = 'auto';
+          strip.style.transform = 'none';
+          strip.style.left = `${Math.round(sRect.left - cRect.left)}px`;
+          strip.style.top = `${Math.round(sRect.top - cRect.top)}px`;
+
+          isDragging = true;
+          dragOffsetX = t.clientX - sRect.left;
+          dragOffsetY = t.clientY - sRect.top;
+          strip.classList.add('ring-2', 'ring-indigo-500/60', 'shadow-indigo-950/60');
+        }
+      }, { passive: true });
+
+      window.addEventListener('touchmove', (e) => {
+        if (!isDragging || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const cRect = container.getBoundingClientRect();
+        const sRect = strip.getBoundingClientRect();
+
+        const pad = 8;
+        const maxLeft = Math.max(pad, cRect.width - sRect.width - pad);
+        const maxTop = Math.max(pad, cRect.height - sRect.height - pad);
+
+        let nextLeft = t.clientX - cRect.left - dragOffsetX;
+        let nextTop = t.clientY - cRect.top - dragOffsetY;
+
+        nextLeft = Math.min(Math.max(pad, nextLeft), maxLeft);
+        nextTop = Math.min(Math.max(pad, nextTop), maxTop);
+
+        strip.style.left = `${Math.round(nextLeft)}px`;
+        strip.style.top = `${Math.round(nextTop)}px`;
+      }, { passive: true });
+
+      window.addEventListener('touchend', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        strip.classList.remove('ring-2', 'ring-indigo-500/60', 'shadow-indigo-950/60');
+      }, { passive: true });
 
       window.addEventListener('resize', () => {
         clampVideoStripIntoBounds();
