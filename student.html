@@ -2004,6 +2004,15 @@
               if (entry && entry.micIconEl) {
                 entry.micIconEl.classList.toggle('hidden', Boolean(u.audioEnabled ?? u.audio));
               }
+              // Malla P2P entre estudiantes: descubrir al compañero y crear conexión dedicada
+              if (currentVideoMode === 'p2p' && isAdmittedToClass) {
+                const pc = getOrCreateP2PPeerConnection(stuPeerId, u.name, 'student');
+                if (webrtcPeerId < stuPeerId) {
+                  if (pc && pc.signalingState === 'stable' && !webrtcPeers[stuPeerId]?.isNegotiating) {
+                    createAndSendP2POffer(stuPeerId, u.name, 'student');
+                  }
+                }
+              }
             }
           }
         });
@@ -2037,15 +2046,27 @@
       });
 
       myChannel.on('broadcast', { event: 'WAITING_ROOM_ADMIT' }, ({ payload }) => {
-        if (!payload || isAdmittedToClass) return;
+        if (!payload) return;
         const targetId = payload.studentId;
         const targetName = (payload.studentName || '').trim().toLowerCase();
         const currentName = (myName || '').trim().toLowerCase();
 
-        // Admitir solo si coincide con el studentId o studentName de este alumno
-        if ((targetId && targetId === myStudentId) || (targetName && targetName === currentName)) {
-          playGentleNotificationBeep();
-          admitStudentToClass();
+        if (!isAdmittedToClass) {
+          // Admitir solo si coincide con el studentId o studentName de este alumno
+          if ((targetId && targetId === myStudentId) || (targetName && targetName === currentName)) {
+            if (payload.videoMode) assignedVideoMode = payload.videoMode;
+            playGentleNotificationBeep();
+            admitStudentToClass();
+          }
+        } else {
+          // Si ya estamos admitidos y entra un nuevo compañero en modo P2P, anunciar presencia tras un breve lapso
+          if (targetName && targetName !== currentName && currentVideoMode === 'p2p') {
+            setTimeout(() => {
+              if (typeof announceWebRTCPresence === 'function') {
+                announceWebRTCPresence();
+              }
+            }, 600);
+          }
         }
       });
 
@@ -4854,7 +4875,8 @@
           urls: [
             'turn:openrelay.metered.ca:80',
             'turn:openrelay.metered.ca:443',
-            'turn:openrelay.metered.ca:443?transport=tcp'
+            'turn:openrelay.metered.ca:443?transport=tcp',
+            'turns:openrelay.metered.ca:443?transport=tcp'
           ],
           username: 'openrelay',
           credential: 'openrelay'
@@ -5548,13 +5570,22 @@
           if (!remoteStream.getTracks().some(existing => existing.id === evt.track.id)) {
             remoteStream.addTrack(evt.track);
           }
+          if (evt.track.kind === 'video') {
+            webrtcPeers[remotePeerId].videoEnabled = true;
+          }
           evt.track.onunmute = () => {
+            if (evt.track.kind === 'video') {
+              webrtcPeers[remotePeerId].videoEnabled = true;
+            }
             updateStudentRemotePeerCardMedia(remotePeerId);
           };
         } else if (evt.streams && evt.streams[0]) {
           evt.streams[0].getTracks().forEach(t => {
             if (!remoteStream.getTracks().some(existing => existing.id === t.id)) {
               remoteStream.addTrack(t);
+            }
+            if (t.kind === 'video') {
+              webrtcPeers[remotePeerId].videoEnabled = true;
             }
           });
         }
@@ -5597,17 +5628,23 @@
       }
 
       if (vidEl) {
+        vidEl.setAttribute('playsinline', '');
+        vidEl.setAttribute('webkit-playsinline', '');
+        vidEl.setAttribute('autoplay', '');
         if (currentVideoMode === 'p2p' && peerObj.stream && vidEl.srcObject !== peerObj.stream) {
           vidEl.srcObject = peerObj.stream;
           vidEl.muted = false;
-          vidEl.setAttribute('playsinline', '');
-          vidEl.setAttribute('webkit-playsinline', '');
-          vidEl.setAttribute('autoplay', '');
-          vidEl.play().catch(() => {});
         }
-        const hasLiveVideo = Boolean(peerObj.videoEnabled) && !peerObj.isSharingScreen;
+        const hasStreamLiveVideoTrack = peerObj.stream && peerObj.stream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled);
+        if (hasStreamLiveVideoTrack) {
+          peerObj.videoEnabled = true;
+        }
+        const hasLiveVideo = (Boolean(peerObj.videoEnabled) || hasStreamLiveVideoTrack) && !peerObj.isSharingScreen;
         vidEl.classList.toggle('hidden', !hasLiveVideo);
         if (phEl) phEl.classList.toggle('hidden', hasLiveVideo);
+        if (hasLiveVideo) {
+          vidEl.play().catch(() => {});
+        }
       }
 
       // Elemento de audio dedicado para P2P para reproducción ininterrumpida incluso con video oculto
@@ -5983,6 +6020,10 @@
       Object.keys(webrtcPeers).forEach(pid => {
         const p = webrtcPeers[pid];
         if (!p) return;
+        // Proteger conexiones P2P activas o en proceso de conexión
+        if (p.pc && (p.pc.connectionState === 'connected' || p.pc.connectionState === 'connecting')) {
+          return;
+        }
         const dedupKey = getParticipantDedupKey(p.name, p.role);
         if (activeParticipantKeys && dedupKey && !activeParticipantKeys.has(dedupKey)) {
           removeStudentRemoteVideoCard(pid, p.name, p.role);
@@ -5996,6 +6037,12 @@
           if (!dKey) return;
           if (seenKeys.has(dKey)) {
             cardEl.remove();
+            return;
+          }
+          const pid = cardEl.getAttribute('data-peer-id');
+          const p = pid ? webrtcPeers[pid] : null;
+          if (p && p.pc && (p.pc.connectionState === 'connected' || p.pc.connectionState === 'connecting')) {
+            seenKeys.add(dKey);
             return;
           }
           if (activeParticipantKeys && activeParticipantKeys.size > 0 && !activeParticipantKeys.has(dKey)) {
@@ -6298,6 +6345,45 @@
         }
       });
 
+      channel.on('broadcast', { event: 'STUDENT_JOIN' }, async ({ payload }) => {
+        if (!payload || !isAdmittedToClass) return;
+        const fromPeerId = payload.peerId;
+        const fromName = payload.studentName;
+        const myCleanName = String(myName || '').trim().toLowerCase();
+        const incomingCleanName = String(fromName || '').trim().toLowerCase();
+        if (!fromPeerId || fromPeerId === webrtcPeerId || incomingCleanName === myCleanName) return;
+
+        console.log('[P2P Mesh] Estudiante detectado en sala:', fromName, fromPeerId);
+        ensureRemoteVideoCard(fromPeerId, fromName, 'student');
+
+        if (currentVideoMode === 'p2p') {
+          const pc = getOrCreateP2PPeerConnection(fromPeerId, fromName, 'student');
+          channel.send({
+            type: 'broadcast',
+            event: 'WEBRTC_ANNOUNCE',
+            payload: {
+              fromPeerId: webrtcPeerId,
+              from: webrtcPeerId,
+              fromName: getMyDisplayNameForWebRTC(),
+              name: getMyDisplayNameForWebRTC(),
+              role: 'student',
+              videoMode: currentVideoMode,
+              toPeerId: fromPeerId,
+              to: fromPeerId,
+              audioEnabled: webrtcAudioEnabled,
+              videoEnabled: webrtcVideoEnabled,
+              isSharingScreen: isSharingScreen
+            }
+          });
+
+          if (webrtcPeerId < fromPeerId) {
+            if (pc && pc.signalingState === 'stable' && !webrtcPeers[fromPeerId]?.isNegotiating) {
+              await createAndSendP2POffer(fromPeerId, fromName, 'student');
+            }
+          }
+        }
+      });
+
       channel.on('broadcast', { event: 'WEBRTC_JOIN' }, async ({ payload }) => {
         if (!payload || !isAdmittedToClass) return;
         if (payload.videoMode) {
@@ -6393,15 +6479,16 @@
         if (!fromId || toId !== webrtcPeerId || fromId === webrtcPeerId) return;
 
         try {
-          const remoteName = payload.fromName || payload.name || 'Profesor (Host)';
-          const remoteRole = payload.role || 'host';
+          const remoteRole = payload.role || (fromId.startsWith('host_') || (payload.name && payload.name.includes('Profesor')) ? 'host' : 'student');
+          const remoteName = payload.fromName || payload.name || (remoteRole === 'host' ? 'Profesor (Host)' : 'Participante');
           const pc = getOrCreateP2PPeerConnection(fromId, remoteName, remoteRole);
           if (!pc) return;
 
-          if (webrtcPeers[fromId]) {
-            webrtcPeers[fromId].audioEnabled = Boolean(payload.audioEnabled ?? payload.audio);
-            webrtcPeers[fromId].videoEnabled = Boolean(payload.videoEnabled ?? payload.video);
-            webrtcPeers[fromId].isSharingScreen = Boolean(payload.isSharingScreen);
+          const peerObj = webrtcPeers[fromId];
+          if (peerObj) {
+            peerObj.audioEnabled = Boolean(payload.audioEnabled ?? payload.audio);
+            peerObj.videoEnabled = Boolean(payload.videoEnabled ?? payload.video);
+            peerObj.isSharingScreen = Boolean(payload.isSharingScreen);
           }
 
           if (pc.signalingState !== 'stable') {
@@ -6410,6 +6497,14 @@
 
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
 
+          // Desahogar candidatos ICE recibidos antes de fijar la descripción remota
+          if (peerObj && peerObj.pendingIce && peerObj.pendingIce.length > 0) {
+            for (const cand of peerObj.pendingIce) {
+              try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) {}
+            }
+            peerObj.pendingIce = [];
+          }
+
           // Asignar pistas locales del estudiante a los transceivers antes de crear la respuesta
           if (p2pLocalStream) {
             const vTrack = isSharingScreen && screenStream
@@ -6417,11 +6512,11 @@
               : (webrtcVideoEnabled ? p2pLocalStream.getVideoTracks()[0] : null);
             const aTrack = webrtcAudioEnabled ? p2pLocalStream.getAudioTracks()[0] : null;
 
-            if (webrtcPeers[fromId].videoSender) {
-              try { await webrtcPeers[fromId].videoSender.replaceTrack(vTrack || null); } catch (e) {}
+            if (peerObj && peerObj.videoSender) {
+              try { await peerObj.videoSender.replaceTrack(vTrack || null); } catch (e) {}
             }
-            if (webrtcPeers[fromId].audioSender) {
-              try { await webrtcPeers[fromId].audioSender.replaceTrack(aTrack || null); } catch (e) {}
+            if (peerObj && peerObj.audioSender) {
+              try { await peerObj.audioSender.replaceTrack(aTrack || null); } catch (e) {}
             }
           }
 
@@ -6461,7 +6556,16 @@
         try {
           const peerObj = webrtcPeers[fromId];
           if (peerObj && peerObj.pc && peerObj.pc.signalingState === 'have-local-offer') {
+            if (payload.audioEnabled !== undefined) peerObj.audioEnabled = Boolean(payload.audioEnabled);
+            if (payload.videoEnabled !== undefined) peerObj.videoEnabled = Boolean(payload.videoEnabled);
             await peerObj.pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+
+            if (peerObj.pendingIce && peerObj.pendingIce.length > 0) {
+              for (const cand of peerObj.pendingIce) {
+                try { await peerObj.pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) {}
+              }
+              peerObj.pendingIce = [];
+            }
             updateStudentRemotePeerCardMedia(fromId);
           }
         } catch (e) {
@@ -6477,8 +6581,12 @@
 
         try {
           const peerObj = webrtcPeers[fromId];
-          if (peerObj && peerObj.pc && payload.candidate && peerObj.pc.remoteDescription) {
+          if (!peerObj || !peerObj.pc || !payload.candidate) return;
+          if (peerObj.pc.remoteDescription && peerObj.pc.remoteDescription.type) {
             await peerObj.pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          } else {
+            peerObj.pendingIce = peerObj.pendingIce || [];
+            peerObj.pendingIce.push(payload.candidate);
           }
         } catch (e) {}
       });
