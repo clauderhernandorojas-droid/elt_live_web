@@ -43,6 +43,73 @@
         max-width: 95% !important;
       }
     }
+    /* Controles táctiles permanentes en móviles y dispositivos sin hover */
+    @media (hover: none), (max-width: 900px) {
+      #webrtcLocalControls {
+        opacity: 1 !important;
+        display: flex !important;
+        pointer-events: auto !important;
+        bottom: 4px !important;
+        gap: 8px !important;
+      }
+      #cardToggleMicBtn,
+      #cardToggleVideoBtn {
+        min-width: 36px !important;
+        min-height: 36px !important;
+        width: 36px !important;
+        height: 36px !important;
+        border-radius: 9999px !important;
+        background-color: rgba(15, 23, 42, 0.9) !important;
+        border: 1.5px solid rgba(255, 255, 255, 0.35) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6) !important;
+      }
+      #cardToggleMicBtn i,
+      #cardToggleVideoBtn i {
+        font-size: 13px !important;
+      }
+      #webrtcLocalCard {
+        min-width: 144px !important;
+        min-height: 86px !important;
+      }
+      #webrtcLocalNameTag {
+        top: 4px !important;
+        bottom: auto !important;
+        left: 4px !important;
+        font-size: 9px !important;
+        padding: 1px 4px !important;
+        background-color: rgba(0, 0, 0, 0.75) !important;
+      }
+    }
+    /* Modo horizontal móvil (landscape con poca altura, ej. Samsung A52 con max-height <= 450px) */
+    @media (max-height: 450px) and (orientation: landscape), (max-height: 450px) {
+      #webrtcVideoStrip {
+        top: 8px !important;
+        bottom: auto !important;
+        right: 8px !important;
+        max-width: 48% !important;
+        padding: 3px !important;
+      }
+      #webrtcLocalCard {
+        min-width: 120px !important;
+        width: 120px !important;
+        height: 72px !important;
+        min-height: 72px !important;
+      }
+      #webrtcLocalControls {
+        bottom: 3px !important;
+        gap: 6px !important;
+      }
+      #cardToggleMicBtn,
+      #cardToggleVideoBtn {
+        min-width: 36px !important;
+        min-height: 36px !important;
+        width: 36px !important;
+        height: 36px !important;
+      }
+    }
     .wb-dot-grid {
       background-color: #f5f6f8;
       background-image: radial-gradient(#cbd5e1 1.35px, transparent 1.35px);
@@ -229,10 +296,19 @@
               <div id="webrtcLocalPlaceholder" class="flex flex-col items-center justify-center text-slate-400">
                 <div id="webrtcLocalAvatarInitial" class="w-8 h-8 rounded-full bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-xs font-bold text-indigo-200 mb-0.5">A</div>
               </div>
-              <span id="webrtcLocalNameTag" class="absolute bottom-1 left-1.5 bg-black/65 backdrop-blur-xs text-white text-[10px] font-medium px-1.5 py-0.5 rounded leading-tight truncate max-w-[90%]">Alumno</span>
-              <span id="webrtcLocalMuteIcon" class="hidden absolute top-1 right-1.5 bg-rose-600/90 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center">
+              <span id="webrtcLocalNameTag" class="absolute bottom-1 left-1.5 bg-black/65 backdrop-blur-xs text-white text-[10px] font-medium px-1.5 py-0.5 rounded leading-tight truncate max-w-[90%] z-10">Alumno</span>
+              <span id="webrtcLocalMuteIcon" class="hidden absolute top-1 right-1.5 bg-rose-600/90 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center z-10">
                 <i class="fa-solid fa-microphone-slash"></i>
               </span>
+              <!-- Botones táctiles/hover de activación rápida de Micrófono y Cámara -->
+              <div id="webrtcLocalControls" class="absolute inset-x-0 bottom-1 flex items-center justify-center gap-1.5 z-20 pointer-events-auto transition-opacity duration-200 opacity-0 group-hover:opacity-100">
+                <button id="cardToggleMicBtn" type="button" class="w-7 h-7 rounded-full bg-black/75 hover:bg-black/90 active:scale-95 text-white flex items-center justify-center shadow border border-white/25 transition cursor-pointer" title="Activar / Silenciar micrófono">
+                  <i id="cardMicIcon" class="fa-solid fa-microphone-slash text-rose-400 text-[11px]"></i>
+                </button>
+                <button id="cardToggleVideoBtn" type="button" class="w-7 h-7 rounded-full bg-black/75 hover:bg-black/90 active:scale-95 text-white flex items-center justify-center shadow border border-white/25 transition cursor-pointer" title="Activar / Apagar cámara">
+                  <i id="cardVideoIcon" class="fa-solid fa-video-slash text-rose-400 text-[11px]"></i>
+                </button>
+              </div>
             </div>
             <!-- Contenedor Dinámico para Miniaturas Remotas (Profesor y compañeros) -->
             <div id="webrtcRemoteCards" class="flex items-center gap-2"></div>
@@ -4850,6 +4926,36 @@
       if (videoLabel) {
         videoLabel.textContent = webrtcVideoEnabled ? 'Stop Video' : 'Video';
       }
+
+      const cardMicBtn = document.getElementById('cardToggleMicBtn');
+      const cardMicIcon = document.getElementById('cardMicIcon');
+      const cardVideoBtn = document.getElementById('cardToggleVideoBtn');
+      const cardVideoIcon = document.getElementById('cardVideoIcon');
+
+      if (cardMicIcon) {
+        cardMicIcon.className = webrtcAudioEnabled
+          ? 'fa-solid fa-microphone text-emerald-400 text-xs'
+          : 'fa-solid fa-microphone-slash text-rose-400 text-xs';
+      }
+      if (cardMicBtn) {
+        cardMicBtn.classList.toggle('border-emerald-500/70', webrtcAudioEnabled);
+        cardMicBtn.classList.toggle('bg-emerald-950/70', webrtcAudioEnabled);
+        cardMicBtn.classList.toggle('border-white/25', !webrtcAudioEnabled);
+        cardMicBtn.classList.toggle('bg-black/75', !webrtcAudioEnabled);
+      }
+
+      if (cardVideoIcon) {
+        cardVideoIcon.className = webrtcVideoEnabled
+          ? 'fa-solid fa-video text-emerald-400 text-xs'
+          : 'fa-solid fa-video-slash text-rose-400 text-xs';
+      }
+      if (cardVideoBtn) {
+        cardVideoBtn.classList.toggle('border-emerald-500/70', webrtcVideoEnabled);
+        cardVideoBtn.classList.toggle('bg-emerald-950/70', webrtcVideoEnabled);
+        cardVideoBtn.classList.toggle('border-white/25', !webrtcVideoEnabled);
+        cardVideoBtn.classList.toggle('bg-black/75', !webrtcVideoEnabled);
+      }
+
       updateShareButtonUI();
     }
 
@@ -5960,13 +6066,51 @@
       const container = document.getElementById('leftWorkspaceColumn');
       if (!strip || !container) return;
 
+      // Botones de micrófono y cámara sobre la tarjeta del estudiante
+      const cardMicBtn = document.getElementById('cardToggleMicBtn');
+      const cardVideoBtn = document.getElementById('cardToggleVideoBtn');
+
+      let lastMicAction = 0;
+      function handleCardMic(e) {
+        const now = Date.now();
+        if (now - lastMicAction < 350) return;
+        lastMicAction = now;
+        e.stopPropagation();
+        if (e.cancelable) e.preventDefault();
+        toggleLocalAudio();
+      }
+
+      let lastVideoAction = 0;
+      function handleCardVideo(e) {
+        const now = Date.now();
+        if (now - lastVideoAction < 350) return;
+        lastVideoAction = now;
+        e.stopPropagation();
+        if (e.cancelable) e.preventDefault();
+        toggleLocalVideo();
+      }
+
+      if (cardMicBtn) {
+        cardMicBtn.addEventListener('click', handleCardMic);
+        cardMicBtn.addEventListener('touchend', handleCardMic);
+        cardMicBtn.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+        cardMicBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+      }
+
+      if (cardVideoBtn) {
+        cardVideoBtn.addEventListener('click', handleCardVideo);
+        cardVideoBtn.addEventListener('touchend', handleCardVideo);
+        cardVideoBtn.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+        cardVideoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+      }
+
       let isDragging = false;
       let dragOffsetX = 0;
       let dragOffsetY = 0;
 
       strip.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
-        if (e.target.closest('button')) return;
+        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip')) return;
 
         const cRect = container.getBoundingClientRect();
         const sRect = strip.getBoundingClientRect();
@@ -6009,55 +6153,88 @@
         strip.classList.remove('ring-2', 'ring-indigo-500/60', 'shadow-indigo-950/60');
       });
 
-      // Soporte táctil en dispositivos móviles para mover la miniatura de cámaras
+      // Soporte táctil móvil con umbral de arrastre para proteger toques en botones
+      let touchStartX = 0;
+      let touchStartY = 0;
+      let touchCanDrag = false;
+
       strip.addEventListener('touchstart', (e) => {
-        if (e.target.closest('button')) return;
+        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip')) return;
         if (e.touches.length === 1) {
           const t = e.touches[0];
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
+          touchCanDrag = true;
+          isDragging = false;
+        }
+      }, { passive: true });
+
+      window.addEventListener('touchmove', (e) => {
+        if (!touchCanDrag || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const dist = Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY);
+
+        if (!isDragging && dist > 6) {
+          isDragging = true;
           const cRect = container.getBoundingClientRect();
           const sRect = strip.getBoundingClientRect();
-
           strip.style.bottom = 'auto';
           strip.style.right = 'auto';
           strip.style.transform = 'none';
           strip.style.left = `${Math.round(sRect.left - cRect.left)}px`;
           strip.style.top = `${Math.round(sRect.top - cRect.top)}px`;
-
-          isDragging = true;
-          dragOffsetX = t.clientX - sRect.left;
-          dragOffsetY = t.clientY - sRect.top;
+          dragOffsetX = touchStartX - sRect.left;
+          dragOffsetY = touchStartY - sRect.top;
           strip.classList.add('ring-2', 'ring-indigo-500/60', 'shadow-indigo-950/60');
+        }
+
+        if (isDragging) {
+          const cRect = container.getBoundingClientRect();
+          const sRect = strip.getBoundingClientRect();
+          const pad = 8;
+          const maxLeft = Math.max(pad, cRect.width - sRect.width - pad);
+          const maxTop = Math.max(pad, cRect.height - sRect.height - pad);
+
+          let nextLeft = t.clientX - cRect.left - dragOffsetX;
+          let nextTop = t.clientY - cRect.top - dragOffsetY;
+
+          nextLeft = Math.min(Math.max(pad, nextLeft), maxLeft);
+          nextTop = Math.min(Math.max(pad, nextTop), maxTop);
+
+          strip.style.left = `${Math.round(nextLeft)}px`;
+          strip.style.top = `${Math.round(nextTop)}px`;
         }
       }, { passive: true });
 
-      window.addEventListener('touchmove', (e) => {
-        if (!isDragging || e.touches.length !== 1) return;
-        const t = e.touches[0];
-        const cRect = container.getBoundingClientRect();
-        const sRect = strip.getBoundingClientRect();
-
-        const pad = 8;
-        const maxLeft = Math.max(pad, cRect.width - sRect.width - pad);
-        const maxTop = Math.max(pad, cRect.height - sRect.height - pad);
-
-        let nextLeft = t.clientX - cRect.left - dragOffsetX;
-        let nextTop = t.clientY - cRect.top - dragOffsetY;
-
-        nextLeft = Math.min(Math.max(pad, nextLeft), maxLeft);
-        nextTop = Math.min(Math.max(pad, nextTop), maxTop);
-
-        strip.style.left = `${Math.round(nextLeft)}px`;
-        strip.style.top = `${Math.round(nextTop)}px`;
-      }, { passive: true });
-
       window.addEventListener('touchend', () => {
+        touchCanDrag = false;
         if (!isDragging) return;
         isDragging = false;
         strip.classList.remove('ring-2', 'ring-indigo-500/60', 'shadow-indigo-950/60');
       }, { passive: true });
 
+      // Posicionamiento adaptado para modo horizontal móvil (evita tapar la barra central de mandos)
+      function applyLandscapePositionIfNeeded() {
+        const isLandscapeMobile = window.innerHeight <= 450 || (window.innerWidth <= 950 && window.innerHeight < window.innerWidth && window.innerHeight <= 480);
+        if (isLandscapeMobile) {
+          strip.style.top = '8px';
+          strip.style.right = '8px';
+          strip.style.bottom = 'auto';
+          strip.style.left = 'auto';
+        }
+      }
+
+      applyLandscapePositionIfNeeded();
+
       window.addEventListener('resize', () => {
         clampVideoStripIntoBounds();
+      });
+
+      window.addEventListener('orientationchange', () => {
+        setTimeout(() => {
+          applyLandscapePositionIfNeeded();
+          clampVideoStripIntoBounds();
+        }, 180);
       });
     })();
 
