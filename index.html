@@ -195,24 +195,38 @@
 
 
     /* Reducción drástica del dock flotante en Modo Jitsi (260px x 150px) */
+    /* Reducción drástica del dock flotante en Modo Jitsi (185px x 110px por defecto) */
     #webrtcVideoStrip.jitsi-mode {
-      max-width: 280px !important;
+      max-width: 205px !important;
       width: auto !important;
-      padding: 4px !important;
-      border-radius: 12px !important;
+      padding: 3px !important;
+      border-radius: 10px !important;
+      transition: max-width 0.2s ease, padding 0.2s ease;
     }
     #webrtcVideoStrip.jitsi-mode #jitsiDockContainer {
-      width: 260px !important;
-      height: 150px !important;
-      max-width: 260px !important;
-      max-height: 150px !important;
+      width: 185px !important;
+      height: 110px !important;
+      max-width: 185px !important;
+      max-height: 110px !important;
       border-radius: 8px !important;
       overflow: hidden !important;
+      transition: width 0.2s ease, height 0.2s ease, max-width 0.2s ease, max-height 0.2s ease;
     }
     #webrtcVideoStrip.jitsi-mode #webrtcStripExpandedBody {
       overflow: hidden !important;
       padding-right: 0 !important;
-      gap: 4px !important;
+      gap: 3px !important;
+    }
+    /* Expansión temporal para interactuar con botones o login de Jitsi */
+    #webrtcVideoStrip.jitsi-mode.jitsi-expanded {
+      max-width: 360px !important;
+      width: auto !important;
+    }
+    #webrtcVideoStrip.jitsi-mode.jitsi-expanded #jitsiDockContainer {
+      width: 340px !important;
+      height: 240px !important;
+      max-width: 340px !important;
+      max-height: 240px !important;
     }
     @media (max-width: 640px) {
       #webrtcVideoStrip.jitsi-mode {
@@ -220,12 +234,18 @@
         width: auto !important;
       }
       #webrtcVideoStrip.jitsi-mode #jitsiDockContainer {
-        width: 260px !important;
-        height: 150px !important;
-        max-width: 260px !important;
-        max-height: 150px !important;
+        width: 185px !important;
+        height: 110px !important;
+        max-width: 185px !important;
+        max-height: 110px !important;
         border-radius: 8px !important;
         overflow: hidden !important;
+      }
+      #webrtcVideoStrip.jitsi-mode.jitsi-expanded #jitsiDockContainer {
+        width: min(340px, 92vw) !important;
+        height: 220px !important;
+        max-width: min(340px, 92vw) !important;
+        max-height: 220px !important;
       }
     }
   </style>
@@ -367,7 +387,7 @@
               <i class="fa-solid fa-grip-vertical text-xs"></i>
             </div>
             <!-- Contenedor Jitsi Meet SFU embebido (Modo Gratis) -->
-            <div id="jitsiDockContainer" style="width: 260px; height: 150px; max-width: 260px; max-height: 150px; border-radius: 8px; overflow: hidden;" class="w-[260px] h-[150px] max-w-[260px] max-h-[150px] rounded-lg overflow-hidden bg-black flex-shrink-0 hidden"></div>
+            <div id="jitsiDockContainer" style="width: 185px; height: 110px; max-width: 185px; max-height: 110px; border-radius: 8px; overflow: hidden;" class="w-[185px] h-[110px] max-w-[185px] max-h-[110px] rounded-lg overflow-hidden bg-black flex-shrink-0 hidden"></div>
             <!-- Miniatura Local (Estudiante) -->
             <div id="webrtcLocalCard" class="relative w-36 h-20 rounded-xl overflow-hidden bg-[#111317] border border-white/10 flex-shrink-0 flex items-center justify-center group">
               <video id="webrtcLocalVideo" autoplay playsinline webkit-playsinline muted class="w-full h-full object-cover transform scale-x-[-1] hidden"></video>
@@ -390,7 +410,10 @@
             </div>
             <!-- Contenedor Dinámico para Miniaturas Remotas (Profesor y compañeros) -->
             <div id="webrtcRemoteCards" class="flex items-center gap-2"></div>
-            <!-- Botón Minimizar Cámaras -->
+            <!-- Botones Expandir y Minimizar Cámaras -->
+            <button id="btnToggleExpandJitsi" type="button" onclick="event.stopPropagation(); toggleJitsiExpandedSize()" class="self-start -mt-0.5 ml-0.5 w-6 h-6 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center text-xs font-bold transition shrink-0 cursor-pointer" title="Expandir / Reducir tamaño de Jitsi">
+              ⤢
+            </button>
             <button id="btnMinimizeVideoStrip" type="button" onclick="event.stopPropagation(); setVideoStripMinimized(true)" class="self-start -mt-0.5 ml-0.5 w-6 h-6 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center text-xs font-bold transition shrink-0 cursor-pointer" title="Minimizar recuadro de cámaras">
               —
             </button>
@@ -6889,6 +6912,17 @@
       }
     }
 
+    window.toggleJitsiExpandedSize = function() {
+      const strip = document.getElementById('webrtcVideoStrip');
+      const btn = document.getElementById('btnToggleExpandJitsi');
+      if (!strip) return;
+      const isExp = strip.classList.toggle('jitsi-expanded');
+      if (btn) {
+        btn.textContent = isExp ? '⤡' : '⤢';
+        btn.title = isExp ? 'Restaurar tamaño compacto (185x110)' : 'Expandir tamaño (340x240)';
+      }
+    };
+
     window.setVideoStripMinimized = function(minimized) {
       isVideoStripMinimized = Boolean(minimized);
       const expandedBody = document.getElementById('webrtcStripExpandedBody');
@@ -6984,7 +7018,7 @@
 
       strip.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
-        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip')) return;
+        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip, #btnToggleExpandJitsi')) return;
 
         const cRect = container.getBoundingClientRect();
         const sRect = strip.getBoundingClientRect();
@@ -7033,7 +7067,7 @@
       let touchCanDrag = false;
 
       strip.addEventListener('touchstart', (e) => {
-        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip')) return;
+        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip, #btnToggleExpandJitsi')) return;
         if (e.touches.length === 1) {
           const t = e.touches[0];
           touchStartX = t.clientX;
