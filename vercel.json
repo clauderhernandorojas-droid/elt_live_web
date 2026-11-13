@@ -1,9 +1,0 @@
-{
-  "version": 2,
-  "cleanUrls": true,
-  "rewrites": [
-    { "source": "/", "destination": "/index.html" },
-    { "source": "/student", "destination": "/index.html" },
-    { "source": "/student.html", "destination": "/index.html" }
-  ]
-}
