@@ -1826,10 +1826,32 @@
       if (typeof updateLocalMediaUI === 'function') updateLocalMediaUI();
       if (typeof setupWebRTCSignaling === 'function') setupWebRTCSignaling(myChannel);
 
-      // Conectar automáticamente al motor LiveKit Cloud SFU
-      if (typeof connectLiveKit === 'function' && currentRoomPin) {
-        connectLiveKit(currentRoomPin, myName, false);
+      // Leer modo de video configurado por el profesor desde la presencia antes de iniciar motor
+      let initialVideoMode = 'p2p';
+      try {
+        const pres = myChannel.presenceState();
+        Object.keys(pres).forEach(k => {
+          const list = Array.isArray(pres[k]) ? pres[k] : [];
+          list.forEach(p => {
+            if (p && (k === 'host' || p.role === 'host') && p.videoMode) {
+              initialVideoMode = p.videoMode;
+            }
+          });
+        });
+      } catch (e) {}
+
+      if (typeof startStudentVideoEngine === 'function') {
+        startStudentVideoEngine(initialVideoMode);
       }
+
+      // Solicitar confirmación de modo de video al Host
+      try {
+        myChannel.send({
+          type: 'broadcast',
+          event: 'REQUEST_VIDEO_MODE',
+          payload: { studentName: myName, studentId: myStudentId }
+        });
+      } catch (e) {}
 
       try {
         await myChannel.track({
@@ -1920,6 +1942,11 @@
           if (!u) return;
 
           if (key === 'host' || u.role === 'host') {
+            if (u.videoMode && u.videoMode !== currentVideoMode && isAdmittedToClass) {
+              if (typeof startStudentVideoEngine === 'function') {
+                startStudentVideoEngine(u.videoMode);
+              }
+            }
             activeParticipantKeys.add('__host__');
             const hostPeerId = (window.__studentLatestPeerByKey && window.__studentLatestPeerByKey['__host__']) || u.peerId || 'host_presence';
             if (typeof ensureRemoteVideoCard === 'function') {
@@ -4774,19 +4801,47 @@
       }
     });
 
-    // ==================== MOTOR LIVEKIT CLOUD SFU (CÁMARAS Y AUDIO EN VIVO) + BARRA INFERIOR ====================
+    // ==================== ARQUITECTURA DUAL DE VIDEO: P2P GRATIS ILIMITADO / LIVEKIT SFU ====================
+    let currentVideoMode = 'p2p'; // 'p2p' | 'livekit' (controlado automáticamente por el profesor de la sala)
+
+    // Configuración STUN + TURN OpenRelay gratuito para conexiones P2P sin cuota
+    const WEBRTC_ICE_SERVERS = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        {
+          urls: [
+            'turn:openrelay.metered.ca:80',
+            'turn:openrelay.metered.ca:443',
+            'turn:openrelay.metered.ca:443?transport=tcp'
+          ],
+          username: 'openrelay',
+          credential: 'openrelay'
+        }
+      ],
+      iceCandidatePoolSize: 10
+    };
+
+    // Estados de Conexión LiveKit Cloud SFU
     let livekitRoom = null;
     let livekitUrl = null;
     let livekitToken = null;
     let isConnectingLiveKit = false;
 
+    // Estados de Conexión WebRTC P2P Directo
+    let p2pLocalStream = null;
+    let screenStream = null;
+    let originalCamTrack = null;
+    let originalMicTrack = null;
+
+    // Estados comunes de medios y participantes
     const webrtcPeerId = 'peer_stu_' + Math.random().toString(36).slice(2, 9);
     let webrtcAudioEnabled = false;
     let webrtcVideoEnabled = false;
     let isSharingScreen = false;
-    let screenStream = null;
-    let activeScreenAudioTrack = null;
-    const webrtcPeers = {}; // peerId -> { name, role, cardEl, videoEl, placeholderEl, isSharingScreen, audioEnabled, videoEnabled }
+    const webrtcPeers = {}; // peerId -> { pc, name, role, stream, cardEl, videoEl, placeholderEl, nameTagEl, micIconEl, isSharingScreen, audioEnabled, videoEnabled, videoSender, audioSender, isNegotiating }
 
     function getMyDisplayNameForWebRTC() {
       return myName || 'Alumno';
@@ -4830,8 +4885,11 @@
       if (localVideo && localPlaceholder) {
         localVideo.classList.add('scale-x-[-1]');
         if (webrtcVideoEnabled) {
-          localVideo.classList.remove('hidden');
-          localPlaceholder.classList.add('hidden');
+          if (currentVideoMode === 'p2p') {
+            handleP2PLocalVideoUI();
+          } else {
+            handleStudentLocalCameraTrack();
+          }
         } else {
           localVideo.classList.add('hidden');
           localPlaceholder.classList.remove('hidden');
@@ -4862,13 +4920,13 @@
 
       const cardMicBtn = document.getElementById('cardToggleMicBtn');
       const cardMicIcon = document.getElementById('cardMicIcon');
-      const cardVideoBtn = document.getElementById('cardToggleVideoBtn');
-      const cardVideoIcon = document.getElementById('cardVideoIcon');
+      const cardCamBtn = document.getElementById('cardToggleVideoBtn');
+      const cardCamIcon = document.getElementById('cardVideoIcon');
 
       if (cardMicIcon) {
         cardMicIcon.className = webrtcAudioEnabled
-          ? 'fa-solid fa-microphone text-emerald-400 text-xs'
-          : 'fa-solid fa-microphone-slash text-rose-400 text-xs';
+          ? 'fa-solid fa-microphone text-emerald-400 text-[11px]'
+          : 'fa-solid fa-microphone-slash text-rose-400 text-[11px]';
       }
       if (cardMicBtn) {
         cardMicBtn.classList.toggle('border-emerald-500/70', webrtcAudioEnabled);
@@ -4877,21 +4935,22 @@
         cardMicBtn.classList.toggle('bg-black/75', !webrtcAudioEnabled);
       }
 
-      if (cardVideoIcon) {
-        cardVideoIcon.className = webrtcVideoEnabled
-          ? 'fa-solid fa-video text-emerald-400 text-xs'
-          : 'fa-solid fa-video-slash text-rose-400 text-xs';
+      if (cardCamIcon) {
+        cardCamIcon.className = webrtcVideoEnabled
+          ? 'fa-solid fa-video text-emerald-400 text-[11px]'
+          : 'fa-solid fa-video-slash text-rose-400 text-[11px]';
       }
-      if (cardVideoBtn) {
-        cardVideoBtn.classList.toggle('border-emerald-500/70', webrtcVideoEnabled);
-        cardVideoBtn.classList.toggle('bg-emerald-950/70', webrtcVideoEnabled);
-        cardVideoBtn.classList.toggle('border-white/25', !webrtcVideoEnabled);
-        cardVideoBtn.classList.toggle('bg-black/75', !webrtcVideoEnabled);
+      if (cardCamBtn) {
+        cardCamBtn.classList.toggle('border-emerald-500/70', webrtcVideoEnabled);
+        cardCamBtn.classList.toggle('bg-emerald-950/70', webrtcVideoEnabled);
+        cardCamBtn.classList.toggle('border-white/25', !webrtcVideoEnabled);
+        cardCamBtn.classList.toggle('bg-black/75', !webrtcVideoEnabled);
       }
 
       updateShareButtonUI();
     }
 
+    // ==================== FUNCIONES LIVEKIT CLOUD SFU ====================
     function handleStudentLocalCameraTrack() {
       const localVideo = document.getElementById('webrtcLocalVideo');
       const localPlaceholder = document.getElementById('webrtcLocalPlaceholder');
@@ -4925,447 +4984,6 @@
         if (localPlaceholder) localPlaceholder.classList.remove('hidden');
       }
     }
-
-    function broadcastScreenShareState(sharing) {
-      if (!myChannel) return;
-      myChannel.send({
-        type: 'broadcast',
-        event: 'SCREEN_SHARE_STATE',
-        payload: {
-          type: 'SCREEN_SHARE_STATE',
-          isSharing: Boolean(sharing),
-          peerId: webrtcPeerId,
-          name: getMyDisplayNameForWebRTC(),
-          role: 'student'
-        }
-      });
-    }
-
-    async function toggleLocalAudio() {
-      webrtcAudioEnabled = !webrtcAudioEnabled;
-      if (livekitRoom) {
-        try {
-          await livekitRoom.localParticipant.setMicrophoneEnabled(webrtcAudioEnabled);
-        } catch (err) {
-          console.warn('[LiveKit] Error al alternar micrófono en Estudiante:', err);
-          webrtcAudioEnabled = !webrtcAudioEnabled;
-        }
-      }
-      updateLocalMediaUI();
-      broadcastWebRTCMediaState();
-    }
-
-    async function toggleLocalVideo() {
-      webrtcVideoEnabled = !webrtcVideoEnabled;
-      if (livekitRoom) {
-        try {
-          await livekitRoom.localParticipant.setCameraEnabled(webrtcVideoEnabled);
-          handleStudentLocalCameraTrack();
-        } catch (err) {
-          console.warn('[LiveKit] Error al alternar cámara en Estudiante:', err);
-          webrtcVideoEnabled = !webrtcVideoEnabled;
-        }
-      }
-      updateLocalMediaUI();
-      broadcastWebRTCMediaState();
-    }
-
-    async function toggleScreenShare() {
-      if (!livekitRoom) return;
-      try {
-        if (isSharingScreen) {
-          await livekitRoom.localParticipant.setScreenShareEnabled(false);
-          isSharingScreen = false;
-          const stageVideo = document.getElementById('remoteScreenShareVideo');
-          if (stageVideo) stageVideo.srcObject = null;
-        } else {
-          const pub = await livekitRoom.localParticipant.setScreenShareEnabled(true, { audio: true });
-          isSharingScreen = true;
-          if (pub && pub.track) {
-            const stageVideo = document.getElementById('remoteScreenShareVideo');
-            if (stageVideo) {
-              pub.track.attach(stageVideo);
-              stageVideo.muted = true;
-            }
-            if (pub.track.mediaStreamTrack) {
-              pub.track.mediaStreamTrack.onended = () => {
-                isSharingScreen = false;
-                updateLocalMediaUI();
-                syncStudentRemoteScreenShareOverlay();
-                broadcastScreenShareState(false);
-              };
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[LiveKit] Error al compartir pantalla en Estudiante:', err);
-        isSharingScreen = false;
-      }
-      updateLocalMediaUI();
-      syncStudentRemoteScreenShareOverlay();
-      broadcastScreenShareState(isSharingScreen);
-      broadcastWebRTCMediaState();
-    }
-
-    function broadcastWebRTCMediaState() {
-      if (!myChannel) return;
-      myChannel.send({
-        type: 'broadcast',
-        event: 'WEBRTC_MEDIA_STATE',
-        payload: {
-          peerId: webrtcPeerId,
-          name: getMyDisplayNameForWebRTC(),
-          role: 'student',
-          audioEnabled: webrtcAudioEnabled,
-          videoEnabled: webrtcVideoEnabled,
-          audio: webrtcAudioEnabled,
-          video: webrtcVideoEnabled,
-          isSharingScreen: isSharingScreen
-        }
-      });
-    }
-
-    window.__studentLatestPeerByKey = window.__studentLatestPeerByKey || {};
-    window.__remoteScreenSharingActive = false;
-    window.__remoteScreenSharingName = 'Profesor (Host)';
-
-    function getParticipantDedupKey(name, role) {
-      if (role === 'host') return '__host__';
-      return String(name || '').trim().toLowerCase();
-    }
-
-    function removeStudentRemoteVideoCard(peerId, name, role) {
-      const strip = document.getElementById('webrtcVideoStrip');
-      const entry = peerId ? webrtcPeers[peerId] : null;
-      const inferredRole = role || (entry && entry.role) || 'student';
-      const resolvedName = name || (entry && entry.name) || '';
-      const dedupKey = getParticipantDedupKey(resolvedName, inferredRole);
-
-      if (peerId && webrtcPeers[peerId]) {
-        delete webrtcPeers[peerId];
-      }
-
-      if (peerId) {
-        const cardById = document.getElementById(`webrtcCard_${peerId}`);
-        if (cardById) cardById.remove();
-        if (strip) {
-          strip.querySelectorAll(`[data-peer-id="${peerId}"]`).forEach(el => el.remove());
-        }
-        document.querySelectorAll(`audio[data-livekit-participant="${peerId}"]`).forEach(a => a.remove());
-      }
-
-      if (dedupKey && strip) {
-        const hasAnotherActive = Object.keys(webrtcPeers).some(
-          pid => pid !== peerId && getParticipantDedupKey(webrtcPeers[pid]?.name, webrtcPeers[pid]?.role) === dedupKey
-        );
-        if (!hasAnotherActive) {
-          strip.querySelectorAll('[data-student-name]').forEach(el => {
-            if (el.getAttribute('data-student-name') === dedupKey) el.remove();
-          });
-          if (window.__studentLatestPeerByKey && window.__studentLatestPeerByKey[dedupKey] === peerId) {
-            delete window.__studentLatestPeerByKey[dedupKey];
-          }
-        }
-      }
-
-      if (typeof updateMinimizedVideoStripSummary === 'function') {
-        updateMinimizedVideoStripSummary();
-      }
-    }
-
-    function cleanupOrphanStudentVideoCards(activeParticipantKeys) {
-      const strip = document.getElementById('webrtcVideoStrip');
-      Object.keys(webrtcPeers).forEach(pid => {
-        const p = webrtcPeers[pid];
-        if (!p) return;
-        const dedupKey = getParticipantDedupKey(p.name, p.role);
-        if (activeParticipantKeys && dedupKey && !activeParticipantKeys.has(dedupKey)) {
-          removeStudentRemoteVideoCard(pid, p.name, p.role);
-        }
-      });
-
-      if (strip) {
-        const seenKeys = new Set();
-        strip.querySelectorAll('[data-student-name]').forEach(cardEl => {
-          const dKey = cardEl.getAttribute('data-student-name') || '';
-          if (!dKey) return;
-          if (seenKeys.has(dKey)) {
-            cardEl.remove();
-            return;
-          }
-          if (activeParticipantKeys && activeParticipantKeys.size > 0 && !activeParticipantKeys.has(dKey)) {
-            cardEl.remove();
-            return;
-          }
-          seenKeys.add(dKey);
-        });
-      }
-
-      if (typeof updateMinimizedVideoStripSummary === 'function') {
-        updateMinimizedVideoStripSummary();
-      }
-    }
-
-    function ensureRemoteVideoCard(remotePeerId, name, role) {
-      const strip = document.getElementById('webrtcVideoStrip');
-      const remoteContainer = document.getElementById('webrtcRemoteCards') || strip;
-      if (!strip || !remoteContainer || !remotePeerId) return null;
-
-      const resolvedRole = role || ((name && name.includes('Profesor')) || String(remotePeerId).startsWith('host_') ? 'host' : 'student');
-      const resolvedName = (name || (resolvedRole === 'host' ? 'Profesor (Host)' : 'Participante')).trim();
-      const dedupKey = getParticipantDedupKey(resolvedName, resolvedRole);
-      const myCleanName = String(myName || '').trim().toLowerCase();
-
-      if (resolvedRole !== 'host' && dedupKey && dedupKey === myCleanName) {
-        return null;
-      }
-
-      if (dedupKey && remotePeerId !== 'host_presence') {
-        window.__studentLatestPeerByKey[dedupKey] = remotePeerId;
-      }
-
-      let existingCard = document.getElementById(`webrtcCard_${remotePeerId}`)
-        || strip.querySelector(`[data-peer-id="${remotePeerId}"]`);
-
-      if (!existingCard && dedupKey) {
-        const matches = Array.from(strip.querySelectorAll('[data-student-name]'))
-          .filter(el => el.getAttribute('data-student-name') === dedupKey);
-        if (matches.length > 0) {
-          existingCard = matches[0];
-          for (let i = 1; i < matches.length; i++) {
-            matches[i].remove();
-          }
-        }
-      }
-
-      if (existingCard) {
-        existingCard.id = `webrtcCard_${remotePeerId}`;
-        existingCard.setAttribute('data-peer-id', remotePeerId);
-        if (dedupKey) existingCard.setAttribute('data-student-name', dedupKey);
-
-        const videoEl = existingCard.querySelector('video');
-        if (videoEl) {
-          videoEl.setAttribute('playsinline', '');
-          videoEl.setAttribute('webkit-playsinline', '');
-          videoEl.setAttribute('autoplay', '');
-        }
-        const placeholderEl = existingCard.querySelector('[data-role="placeholder"]') || existingCard.querySelectorAll('div')[0];
-        const nameTagEl = existingCard.querySelector('[data-role="name"]') || existingCard.querySelectorAll('div')[2];
-        const micIconEl = existingCard.querySelector('[data-role="mute"]') || existingCard.querySelectorAll('div')[3];
-
-        if (nameTagEl && resolvedName) nameTagEl.textContent = resolvedName;
-
-        if (!webrtcPeers[remotePeerId]) webrtcPeers[remotePeerId] = {};
-        Object.assign(webrtcPeers[remotePeerId], {
-          name: resolvedName,
-          role: resolvedRole,
-          cardEl: existingCard,
-          videoEl: videoEl || webrtcPeers[remotePeerId].videoEl,
-          placeholderEl: placeholderEl || webrtcPeers[remotePeerId].placeholderEl,
-          nameTagEl: nameTagEl || webrtcPeers[remotePeerId].nameTagEl,
-          micIconEl: micIconEl || webrtcPeers[remotePeerId].micIconEl
-        });
-        updateMinimizedVideoStripSummary();
-        return webrtcPeers[remotePeerId];
-      }
-
-      const card = document.createElement('div');
-      card.id = `webrtcCard_${remotePeerId}`;
-      card.setAttribute('data-peer-id', remotePeerId);
-      if (dedupKey) card.setAttribute('data-student-name', dedupKey);
-      card.className = 'relative w-36 h-20 rounded-xl overflow-hidden bg-[#111317] border border-white/10 shrink-0 flex items-center justify-center';
-
-      const video = document.createElement('video');
-      video.autoplay = true;
-      video.playsInline = true;
-      video.muted = false;
-      video.setAttribute('playsinline', '');
-      video.setAttribute('webkit-playsinline', '');
-      video.setAttribute('autoplay', '');
-      video.className = 'w-full h-full object-cover hidden';
-
-      const placeholder = document.createElement('div');
-      placeholder.setAttribute('data-role', 'placeholder');
-      placeholder.className = 'flex flex-col items-center justify-center text-slate-400';
-      const initial = (resolvedName || 'P').trim().charAt(0).toUpperCase();
-      const avatarColor = resolvedRole === 'host'
-        ? 'bg-emerald-600/30 border-emerald-400/40 text-emerald-200'
-        : 'bg-[#0e72ed]/30 border-[#0e72ed]/60 text-white';
-      placeholder.innerHTML = `<div class="w-8 h-8 rounded-full ${avatarColor} border flex items-center justify-center font-bold text-xs mb-0.5">${initial}</div>`;
-
-      const nameTag = document.createElement('div');
-      nameTag.setAttribute('data-role', 'name');
-      nameTag.className = 'absolute bottom-1 left-1.5 bg-black/65 backdrop-blur-xs text-white text-[10px] font-medium px-1.5 py-0.5 rounded leading-tight truncate max-w-[90%]';
-      nameTag.textContent = resolvedName;
-
-      const micIcon = document.createElement('div');
-      micIcon.setAttribute('data-role', 'mute');
-      micIcon.className = 'absolute top-1 right-1.5 bg-rose-600/90 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center';
-      micIcon.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
-
-      card.appendChild(video);
-      card.appendChild(placeholder);
-      card.appendChild(nameTag);
-      card.appendChild(micIcon);
-
-      const expandedBody = document.getElementById('webrtcStripExpandedBody') || strip;
-      const localCard = document.getElementById('webrtcLocalCard');
-      if (resolvedRole === 'host') {
-        expandedBody.insertBefore(card, localCard || expandedBody.firstChild);
-      } else {
-        remoteContainer.appendChild(card);
-      }
-
-      if (!webrtcPeers[remotePeerId]) webrtcPeers[remotePeerId] = {};
-      Object.assign(webrtcPeers[remotePeerId], {
-        name: resolvedName,
-        role: resolvedRole,
-        cardEl: card,
-        videoEl: video,
-        placeholderEl: placeholder,
-        nameTagEl: nameTag,
-        micIconEl: micIcon,
-        audioEnabled: false,
-        videoEnabled: false,
-        isSharingScreen: false
-      });
-      updateMinimizedVideoStripSummary();
-      return webrtcPeers[remotePeerId];
-    }
-
-    function syncStudentRemoteScreenShareOverlay() {
-      const overlay = document.getElementById('remoteScreenShareOverlay');
-      const stageVideo = document.getElementById('remoteScreenShareVideo');
-      const stageLabel = document.getElementById('remoteScreenShareLabel');
-      const stopStageBtn = document.getElementById('btnStopScreenShareStage');
-      const restoreStageBtn = document.getElementById('btnRestoreScreenShareStage');
-      if (!overlay || !stageVideo) return;
-
-      const isMinStage = overlay.classList.contains('hidden') && restoreStageBtn && !restoreStageBtn.classList.contains('hidden');
-
-      if (isSharingScreen) {
-        stageVideo.muted = true;
-        stageVideo.play().catch(() => {});
-        if (stageLabel) stageLabel.textContent = '🖥️ Estás compartiendo tu pantalla en vivo';
-        if (stopStageBtn) {
-          stopStageBtn.classList.remove('hidden');
-          stopStageBtn.classList.add('inline-flex');
-        }
-        if (!isMinStage) {
-          overlay.classList.remove('hidden');
-          overlay.classList.add('flex');
-          if (restoreStageBtn) restoreStageBtn.classList.add('hidden');
-        }
-        return;
-      }
-
-      let sharingPeer = Object.values(webrtcPeers).find(p => p && p.isSharingScreen);
-      if (sharingPeer || window.__remoteScreenSharingActive) {
-        const sharerName = (sharingPeer && sharingPeer.name) || window.__remoteScreenSharingName || 'Profesor (Host)';
-        if (stageLabel) {
-          stageLabel.textContent = `🖥️ ${sharerName} está compartiendo pantalla`;
-        }
-        if (stopStageBtn) {
-          stopStageBtn.classList.add('hidden');
-          stopStageBtn.classList.remove('inline-flex');
-        }
-        if (!isMinStage) {
-          overlay.classList.remove('hidden');
-          overlay.classList.add('flex');
-          if (restoreStageBtn) restoreStageBtn.classList.add('hidden');
-        }
-      } else {
-        if (stageVideo.srcObject) stageVideo.srcObject = null;
-        if (stopStageBtn) {
-          stopStageBtn.classList.add('hidden');
-          stopStageBtn.classList.remove('inline-flex');
-        }
-        overlay.classList.add('hidden');
-        overlay.classList.remove('flex');
-        if (restoreStageBtn) restoreStageBtn.classList.add('hidden');
-      }
-    }
-
-    let lastScreenShareVolume = 0.8;
-
-    function updateScreenShareAudioUI(isMuted, volume) {
-      const icon = document.getElementById('screenShareAudioIcon');
-      const slider = document.getElementById('screenShareAudioVolume');
-      const percent = document.getElementById('screenShareAudioPercent');
-      if (icon) {
-        if (isMuted || volume === 0) {
-          icon.className = 'fa-solid fa-volume-xmark text-rose-400 text-xs';
-        } else if (volume < 0.5) {
-          icon.className = 'fa-solid fa-volume-low text-emerald-400 text-xs';
-        } else {
-          icon.className = 'fa-solid fa-volume-high text-emerald-400 text-xs';
-        }
-      }
-      if (slider && !slider.matches(':active')) {
-        slider.value = isMuted ? 0 : volume;
-      }
-      if (percent) {
-        percent.textContent = `${Math.round((isMuted ? 0 : volume) * 100)}%`;
-      }
-    }
-
-    document.getElementById('btnToggleScreenShareAudio')?.addEventListener('click', () => {
-      const stageVideo = document.getElementById('remoteScreenShareVideo');
-      const slider = document.getElementById('screenShareAudioVolume');
-      if (!stageVideo) return;
-      if (stageVideo.muted || stageVideo.volume === 0) {
-        const targetVol = lastScreenShareVolume > 0 ? lastScreenShareVolume : 0.8;
-        stageVideo.muted = false;
-        stageVideo.volume = targetVol;
-        if (slider) slider.value = targetVol;
-        updateScreenShareAudioUI(false, targetVol);
-      } else {
-        lastScreenShareVolume = stageVideo.volume || 0.8;
-        stageVideo.muted = true;
-        stageVideo.volume = 0;
-        if (slider) slider.value = 0;
-        updateScreenShareAudioUI(true, 0);
-      }
-    });
-
-    document.getElementById('screenShareAudioVolume')?.addEventListener('input', (e) => {
-      const stageVideo = document.getElementById('remoteScreenShareVideo');
-      if (!stageVideo) return;
-      const val = parseFloat(e.target.value) || 0;
-      if (val > 0) {
-        stageVideo.muted = false;
-        stageVideo.volume = val;
-        lastScreenShareVolume = val;
-        updateScreenShareAudioUI(false, val);
-      } else {
-        stageVideo.muted = true;
-        stageVideo.volume = 0;
-        updateScreenShareAudioUI(true, 0);
-      }
-    });
-
-    window.minimizeStudentScreenShareStage = function() {
-      const overlay = document.getElementById('remoteScreenShareOverlay');
-      const restoreBtn = document.getElementById('btnRestoreScreenShareStage');
-      if (overlay) {
-        overlay.classList.add('hidden');
-        overlay.classList.remove('flex');
-      }
-      const hasSharing = Boolean(isSharingScreen || window.__remoteScreenSharingActive || Object.values(webrtcPeers).some(p => p.isSharingScreen));
-      if (restoreBtn && hasSharing) {
-        restoreBtn.classList.remove('hidden');
-      }
-    };
-
-    window.restoreStudentScreenShareStage = function() {
-      const overlay = document.getElementById('remoteScreenShareOverlay');
-      const restoreBtn = document.getElementById('btnRestoreScreenShareStage');
-      if (restoreBtn) restoreBtn.classList.add('hidden');
-      if (overlay) {
-        overlay.classList.remove('hidden');
-        overlay.classList.add('flex');
-      }
-    };
 
     function handleStudentRemoteTrackSubscribed(track, publication, participant) {
       if (!participant) return;
@@ -5609,8 +5227,1020 @@
       }
     }
 
+    // ==================== FUNCIONES WEBRTC P2P DIRECTO (GRATIS ILIMITADO) ====================
+    async function ensureP2PLocalStream(wantAudio, wantVideo) {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Tu navegador no soporta acceso a cámara/micrófono WebRTC.');
+        return null;
+      }
+      try {
+        if (!p2pLocalStream) {
+          p2pLocalStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: { width: { ideal: 320 }, height: { ideal: 180 }, frameRate: { ideal: 24 } }
+          });
+          p2pLocalStream.getAudioTracks().forEach(t => { t.enabled = Boolean(wantAudio); });
+          p2pLocalStream.getVideoTracks().forEach(t => { t.enabled = Boolean(wantVideo); });
+          originalCamTrack = p2pLocalStream.getVideoTracks()[0] || null;
+          originalMicTrack = p2pLocalStream.getAudioTracks()[0] || null;
+        } else {
+          if (wantAudio && p2pLocalStream.getAudioTracks().length === 0) {
+            const aStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            aStream.getAudioTracks().forEach(t => p2pLocalStream.addTrack(t));
+            originalMicTrack = p2pLocalStream.getAudioTracks()[0] || null;
+          }
+          if (wantVideo && p2pLocalStream.getVideoTracks().length === 0) {
+            const vStream = await navigator.mediaDevices.getUserMedia({
+              video: { width: { ideal: 320 }, height: { ideal: 180 }, frameRate: { ideal: 24 } }
+            });
+            vStream.getVideoTracks().forEach(t => p2pLocalStream.addTrack(t));
+            originalCamTrack = p2pLocalStream.getVideoTracks()[0] || null;
+          }
+        }
+
+        handleP2PLocalVideoUI();
+        await syncP2PTracksToAllPeers();
+        return p2pLocalStream;
+      } catch (err) {
+        console.warn('[P2P] No se pudo acceder a cámara/micrófono en Estudiante:', err);
+        return null;
+      }
+    }
+
+    function handleP2PLocalVideoUI() {
+      const localVideo = document.getElementById('webrtcLocalVideo');
+      const localPlaceholder = document.getElementById('webrtcLocalPlaceholder');
+      if (!localVideo) return;
+
+      localVideo.muted = true;
+      localVideo.setAttribute('muted', '');
+      localVideo.setAttribute('playsinline', '');
+      localVideo.setAttribute('webkit-playsinline', '');
+      localVideo.setAttribute('autoplay', '');
+
+      if (p2pLocalStream && localVideo.srcObject !== p2pLocalStream) {
+        localVideo.srcObject = p2pLocalStream;
+      }
+      if (webrtcVideoEnabled && p2pLocalStream && p2pLocalStream.getVideoTracks().some(t => t.enabled && t.readyState === 'live')) {
+        localVideo.classList.remove('hidden');
+        localPlaceholder?.classList.add('hidden');
+        localVideo.play().catch(() => {});
+      } else {
+        localVideo.classList.add('hidden');
+        localPlaceholder?.classList.remove('hidden');
+      }
+    }
+
+    async function syncP2PTracksToAllPeers() {
+      if (currentVideoMode !== 'p2p') return;
+      for (const remotePeerId of Object.keys(webrtcPeers)) {
+        const peerObj = webrtcPeers[remotePeerId];
+        if (!peerObj || !peerObj.pc) continue;
+
+        const currentTrack = isSharingScreen && screenStream
+          ? screenStream.getVideoTracks()[0]
+          : (webrtcVideoEnabled && p2pLocalStream ? p2pLocalStream.getVideoTracks()[0] : null);
+
+        if (peerObj.videoSender) {
+          try { await peerObj.videoSender.replaceTrack(currentTrack || null); } catch (e) {}
+        }
+
+        const micTrack = (webrtcAudioEnabled && p2pLocalStream) ? p2pLocalStream.getAudioTracks()[0] : null;
+        if (peerObj.audioSender) {
+          try { await peerObj.audioSender.replaceTrack(micTrack || null); } catch (e) {}
+        }
+      }
+    }
+
+    function getOrCreateP2PPeerConnection(remotePeerId, remoteName, remoteRole) {
+      if (webrtcPeers[remotePeerId] && webrtcPeers[remotePeerId].pc) {
+        const st = webrtcPeers[remotePeerId].pc.connectionState;
+        if (st !== 'closed' && st !== 'failed') {
+          if (remoteName) webrtcPeers[remotePeerId].name = remoteName;
+          ensureRemoteVideoCard(remotePeerId, webrtcPeers[remotePeerId].name, remoteRole || webrtcPeers[remotePeerId].role);
+          return webrtcPeers[remotePeerId].pc;
+        }
+        try { webrtcPeers[remotePeerId].pc.close(); } catch (e) {}
+      }
+
+      const pc = new RTCPeerConnection(WEBRTC_ICE_SERVERS);
+      const remoteStream = new MediaStream();
+
+      const role = remoteRole || ((remoteName && remoteName.includes('Profesor')) || String(remotePeerId).startsWith('host_') ? 'host' : 'student');
+      ensureRemoteVideoCard(remotePeerId, remoteName, role);
+
+      if (!webrtcPeers[remotePeerId]) webrtcPeers[remotePeerId] = {};
+      Object.assign(webrtcPeers[remotePeerId], {
+        pc,
+        stream: remoteStream,
+        name: remoteName || webrtcPeers[remotePeerId].name || 'Participante',
+        role: role,
+        audioEnabled: Boolean(webrtcPeers[remotePeerId].audioEnabled),
+        videoEnabled: Boolean(webrtcPeers[remotePeerId].videoEnabled),
+        isSharingScreen: Boolean(webrtcPeers[remotePeerId].isSharingScreen),
+        videoSender: null,
+        audioSender: null,
+        isNegotiating: false
+      });
+
+      // Transceivers sendrecv bidireccionales
+      try {
+        const aTr = pc.addTransceiver('audio', { direction: 'sendrecv' });
+        webrtcPeers[remotePeerId].audioSender = aTr.sender;
+        const vTr = pc.addTransceiver('video', { direction: 'sendrecv' });
+        webrtcPeers[remotePeerId].videoSender = vTr.sender;
+      } catch (trErr) {
+        console.warn('[P2P] Error configurando transceivers en Estudiante:', trErr);
+      }
+
+      if (isSharingScreen && screenStream) {
+        const sVideo = screenStream.getVideoTracks()[0];
+        if (sVideo && webrtcPeers[remotePeerId].videoSender) {
+          webrtcPeers[remotePeerId].videoSender.replaceTrack(sVideo).catch(() => {});
+        }
+      } else if (p2pLocalStream) {
+        const vTrack = p2pLocalStream.getVideoTracks()[0];
+        const aTrack = p2pLocalStream.getAudioTracks()[0];
+        if (vTrack && webrtcPeers[remotePeerId].videoSender) {
+          webrtcPeers[remotePeerId].videoSender.replaceTrack(vTrack).catch(() => {});
+        }
+        if (aTrack && webrtcPeers[remotePeerId].audioSender) {
+          webrtcPeers[remotePeerId].audioSender.replaceTrack(aTrack).catch(() => {});
+        }
+      }
+
+      pc.onicecandidate = (evt) => {
+        if (evt.candidate && myChannel && currentVideoMode === 'p2p') {
+          myChannel.send({
+            type: 'broadcast',
+            event: 'WEBRTC_ICE',
+            payload: {
+              fromPeerId: webrtcPeerId,
+              from: webrtcPeerId,
+              toPeerId: remotePeerId,
+              to: remotePeerId,
+              candidate: evt.candidate
+            }
+          });
+        }
+      };
+
+      pc.ontrack = (evt) => {
+        if (evt.track) {
+          remoteStream.getTracks().forEach(existing => {
+            if (existing.kind === evt.track.kind && existing.id !== evt.track.id) {
+              remoteStream.removeTrack(existing);
+            }
+          });
+          if (!remoteStream.getTracks().some(existing => existing.id === evt.track.id)) {
+            remoteStream.addTrack(evt.track);
+          }
+          evt.track.onunmute = () => {
+            updateStudentRemotePeerCardMedia(remotePeerId);
+          };
+        } else if (evt.streams && evt.streams[0]) {
+          evt.streams[0].getTracks().forEach(t => {
+            if (!remoteStream.getTracks().some(existing => existing.id === t.id)) {
+              remoteStream.addTrack(t);
+            }
+          });
+        }
+        updateStudentRemotePeerCardMedia(remotePeerId);
+      };
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        if (state === 'failed' || state === 'closed') {
+          removeStudentRemoteVideoCard(remotePeerId, webrtcPeers[remotePeerId]?.name, role);
+          syncStudentRemoteScreenShareOverlay();
+        } else if (state === 'disconnected') {
+          setTimeout(() => {
+            if (webrtcPeers[remotePeerId] && webrtcPeers[remotePeerId].pc === pc) {
+              if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                removeStudentRemoteVideoCard(remotePeerId, webrtcPeers[remotePeerId]?.name, role);
+                syncStudentRemoteScreenShareOverlay();
+              }
+            }
+          }, 4500);
+        }
+      };
+
+      return pc;
+    }
+
+    function updateStudentRemotePeerCardMedia(remotePeerId) {
+      const peerObj = webrtcPeers[remotePeerId];
+      if (!peerObj) return;
+      ensureRemoteVideoCard(remotePeerId, peerObj.name, peerObj.role);
+      const card = peerObj.cardEl || document.getElementById(`webrtcCard_${remotePeerId}`);
+      if (!card) return;
+
+      const vidEl = peerObj.videoEl || card.querySelector('video');
+      const phEl = peerObj.placeholderEl || card.querySelector('[data-role="placeholder"]');
+      const micEl = peerObj.micIconEl || card.querySelector('[data-role="mute"]');
+
+      if (micEl) {
+        micEl.classList.toggle('hidden', Boolean(peerObj.audioEnabled));
+      }
+
+      if (vidEl) {
+        if (currentVideoMode === 'p2p' && peerObj.stream && vidEl.srcObject !== peerObj.stream) {
+          vidEl.srcObject = peerObj.stream;
+          vidEl.muted = false;
+          vidEl.setAttribute('playsinline', '');
+          vidEl.setAttribute('webkit-playsinline', '');
+          vidEl.setAttribute('autoplay', '');
+          vidEl.play().catch(() => {});
+        }
+        const hasLiveVideo = Boolean(peerObj.videoEnabled) && !peerObj.isSharingScreen;
+        vidEl.classList.toggle('hidden', !hasLiveVideo);
+        if (phEl) phEl.classList.toggle('hidden', hasLiveVideo);
+      }
+
+      // Elemento de audio dedicado para P2P para reproducción ininterrumpida incluso con video oculto
+      if (currentVideoMode === 'p2p' && peerObj.stream && peerObj.stream.getAudioTracks().length > 0) {
+        let p2pAudioEl = document.getElementById(`webrtc_audio_${remotePeerId}`);
+        if (!p2pAudioEl) {
+          p2pAudioEl = document.createElement('audio');
+          p2pAudioEl.id = `webrtc_audio_${remotePeerId}`;
+          p2pAudioEl.setAttribute('data-p2p-peer', remotePeerId);
+          p2pAudioEl.autoplay = true;
+          p2pAudioEl.setAttribute('playsinline', '');
+          document.body.appendChild(p2pAudioEl);
+        }
+        if (p2pAudioEl.srcObject !== peerObj.stream) {
+          p2pAudioEl.srcObject = peerObj.stream;
+        }
+        p2pAudioEl.play().catch(() => {});
+      }
+
+      syncStudentRemoteScreenShareOverlay();
+      if (typeof updateMinimizedVideoStripSummary === 'function') {
+        updateMinimizedVideoStripSummary();
+      }
+    }
+
+    async function startP2PScreenShare() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        alert('Tu navegador no soporta compartir pantalla.');
+        return;
+      }
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: 'always' },
+          audio: true
+        });
+      } catch (err) {
+        return;
+      }
+
+      const screenVideoTrack = screenStream.getVideoTracks()[0];
+      if (!screenVideoTrack) return;
+      isSharingScreen = true;
+
+      screenVideoTrack.onended = () => {
+        stopP2PScreenShare();
+      };
+
+      const stageVideo = document.getElementById('remoteScreenShareVideo');
+      if (stageVideo) {
+        stageVideo.srcObject = screenStream;
+        stageVideo.muted = true;
+        stageVideo.play().catch(() => {});
+      }
+
+      for (const remotePeerId of Object.keys(webrtcPeers)) {
+        const peerObj = webrtcPeers[remotePeerId];
+        if (peerObj && peerObj.videoSender) {
+          try { await peerObj.videoSender.replaceTrack(screenVideoTrack); } catch (e) {}
+        }
+      }
+
+      updateLocalMediaUI();
+      syncStudentRemoteScreenShareOverlay();
+      broadcastScreenShareState(true);
+    }
+
+    async function stopP2PScreenShare() {
+      if (!isSharingScreen && !screenStream) return;
+      isSharingScreen = false;
+
+      if (screenStream) {
+        screenStream.getTracks().forEach(t => t.stop());
+        screenStream = null;
+      }
+
+      const stageVideo = document.getElementById('remoteScreenShareVideo');
+      if (stageVideo) stageVideo.srcObject = null;
+
+      const restoreTrack = (webrtcVideoEnabled && p2pLocalStream && p2pLocalStream.getVideoTracks()[0]) || null;
+      for (const remotePeerId of Object.keys(webrtcPeers)) {
+        const peerObj = webrtcPeers[remotePeerId];
+        if (peerObj && peerObj.videoSender) {
+          try { await peerObj.videoSender.replaceTrack(restoreTrack); } catch (e) {}
+        }
+      }
+
+      updateLocalMediaUI();
+      syncStudentRemoteScreenShareOverlay();
+      broadcastScreenShareState(false);
+    }
+
+    function closeAllP2PConnections() {
+      Object.keys(webrtcPeers).forEach(pid => {
+        const p = webrtcPeers[pid];
+        if (p && p.pc) {
+          try {
+            p.pc.onicecandidate = null;
+            p.pc.ontrack = null;
+            p.pc.close();
+          } catch (e) {}
+          p.pc = null;
+        }
+      });
+      document.querySelectorAll('audio[data-p2p-peer]').forEach(a => a.remove());
+    }
+
+    // ==================== INICIALIZADOR Y CONTROLES UNIFICADOS (P2P / LIVEKIT) ====================
+    async function startStudentVideoEngine(mode) {
+      const targetMode = (mode === 'livekit') ? 'livekit' : 'p2p';
+      console.log('[ELT Live] Inicializando motor de video Estudiante:', targetMode);
+      currentVideoMode = targetMode;
+
+      if (targetMode === 'livekit') {
+        closeAllP2PConnections();
+        if (p2pLocalStream) {
+          p2pLocalStream.getTracks().forEach(t => t.stop());
+          p2pLocalStream = null;
+        }
+        if (currentRoomPin && isAdmittedToClass) {
+          await connectLiveKit(currentRoomPin, myName, false);
+        }
+      } else {
+        // Modo P2P directo
+        if (livekitRoom) {
+          try { await livekitRoom.disconnect(); } catch (e) {}
+          livekitRoom = null;
+        }
+        if (isAdmittedToClass && (webrtcAudioEnabled || webrtcVideoEnabled)) {
+          await ensureP2PLocalStream(webrtcAudioEnabled, webrtcVideoEnabled);
+        }
+        if (isAdmittedToClass) {
+          announceWebRTCPresence();
+        }
+      }
+      updateLocalMediaUI();
+    }
+
+    async function toggleLocalAudio() {
+      webrtcAudioEnabled = !webrtcAudioEnabled;
+      if (currentVideoMode === 'livekit' && livekitRoom) {
+        try {
+          await livekitRoom.localParticipant.setMicrophoneEnabled(webrtcAudioEnabled);
+        } catch (err) {
+          console.warn('[LiveKit] Error al alternar micrófono en Estudiante:', err);
+          webrtcAudioEnabled = !webrtcAudioEnabled;
+        }
+      } else if (currentVideoMode === 'p2p') {
+        if (!p2pLocalStream && webrtcAudioEnabled) {
+          await ensureP2PLocalStream(true, webrtcVideoEnabled);
+        }
+        if (p2pLocalStream) {
+          p2pLocalStream.getAudioTracks().forEach(t => { t.enabled = webrtcAudioEnabled; });
+        }
+        await syncP2PTracksToAllPeers();
+      }
+      updateLocalMediaUI();
+      broadcastWebRTCMediaState();
+    }
+
+    async function toggleLocalVideo() {
+      webrtcVideoEnabled = !webrtcVideoEnabled;
+      if (currentVideoMode === 'livekit' && livekitRoom) {
+        try {
+          await livekitRoom.localParticipant.setCameraEnabled(webrtcVideoEnabled);
+          handleStudentLocalCameraTrack();
+        } catch (err) {
+          console.warn('[LiveKit] Error al alternar cámara en Estudiante:', err);
+          webrtcVideoEnabled = !webrtcVideoEnabled;
+        }
+      } else if (currentVideoMode === 'p2p') {
+        if (!p2pLocalStream && webrtcVideoEnabled) {
+          await ensureP2PLocalStream(webrtcAudioEnabled, true);
+        }
+        if (p2pLocalStream) {
+          p2pLocalStream.getVideoTracks().forEach(t => { t.enabled = webrtcVideoEnabled; });
+        }
+        handleP2PLocalVideoUI();
+        await syncP2PTracksToAllPeers();
+      }
+      updateLocalMediaUI();
+      broadcastWebRTCMediaState();
+    }
+
+    async function toggleScreenShare() {
+      if (currentVideoMode === 'livekit') {
+        if (!livekitRoom) return;
+        try {
+          if (isSharingScreen) {
+            await livekitRoom.localParticipant.setScreenShareEnabled(false);
+            isSharingScreen = false;
+            const stageVideo = document.getElementById('remoteScreenShareVideo');
+            if (stageVideo) stageVideo.srcObject = null;
+          } else {
+            const pub = await livekitRoom.localParticipant.setScreenShareEnabled(true, { audio: true });
+            isSharingScreen = true;
+            if (pub && pub.track) {
+              const stageVideo = document.getElementById('remoteScreenShareVideo');
+              if (stageVideo) {
+                pub.track.attach(stageVideo);
+                stageVideo.muted = true;
+              }
+              if (pub.track.mediaStreamTrack) {
+                pub.track.mediaStreamTrack.onended = () => {
+                  isSharingScreen = false;
+                  updateLocalMediaUI();
+                  syncStudentRemoteScreenShareOverlay();
+                  broadcastScreenShareState(false);
+                };
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[LiveKit] Error al compartir pantalla en Estudiante:', err);
+          isSharingScreen = false;
+        }
+      } else {
+        // Modo P2P
+        if (isSharingScreen) {
+          await stopP2PScreenShare();
+        } else {
+          await startP2PScreenShare();
+        }
+      }
+      updateLocalMediaUI();
+      syncStudentRemoteScreenShareOverlay();
+      broadcastScreenShareState(isSharingScreen);
+      broadcastWebRTCMediaState();
+    }
+
+    function broadcastScreenShareState(sharing) {
+      if (!myChannel) return;
+      myChannel.send({
+        type: 'broadcast',
+        event: 'SCREEN_SHARE_STATE',
+        payload: {
+          type: 'SCREEN_SHARE_STATE',
+          isSharing: Boolean(sharing),
+          peerId: webrtcPeerId,
+          name: getMyDisplayNameForWebRTC(),
+          role: 'student'
+        }
+      });
+    }
+
+    function broadcastWebRTCMediaState() {
+      if (!myChannel) return;
+      myChannel.send({
+        type: 'broadcast',
+        event: 'WEBRTC_MEDIA_STATE',
+        payload: {
+          peerId: webrtcPeerId,
+          name: getMyDisplayNameForWebRTC(),
+          role: 'student',
+          audioEnabled: webrtcAudioEnabled,
+          videoEnabled: webrtcVideoEnabled,
+          audio: webrtcAudioEnabled,
+          video: webrtcVideoEnabled,
+          isSharingScreen: isSharingScreen
+        }
+      });
+    }
+
+    function announceWebRTCPresence() {
+      if (!myChannel) return;
+      myChannel.send({
+        type: 'broadcast',
+        event: 'WEBRTC_JOIN',
+        payload: {
+          peerId: webrtcPeerId,
+          fromPeerId: webrtcPeerId,
+          from: webrtcPeerId,
+          name: getMyDisplayNameForWebRTC(),
+          fromName: getMyDisplayNameForWebRTC(),
+          role: 'student',
+          audioEnabled: webrtcAudioEnabled,
+          videoEnabled: webrtcVideoEnabled,
+          audio: webrtcAudioEnabled,
+          video: webrtcVideoEnabled,
+          isSharingScreen: isSharingScreen
+        }
+      });
+    }
+
+    window.__studentLatestPeerByKey = window.__studentLatestPeerByKey || {};
+    window.__remoteScreenSharingActive = false;
+    window.__remoteScreenSharingName = 'Profesor (Host)';
+
+    function getParticipantDedupKey(name, role) {
+      if (role === 'host') return '__host__';
+      return String(name || '').trim().toLowerCase();
+    }
+
+    function removeStudentRemoteVideoCard(peerId, name, role) {
+      const strip = document.getElementById('webrtcVideoStrip');
+      const entry = peerId ? webrtcPeers[peerId] : null;
+      const inferredRole = role || (entry && entry.role) || 'student';
+      const resolvedName = name || (entry && entry.name) || '';
+      const dedupKey = getParticipantDedupKey(resolvedName, inferredRole);
+
+      if (peerId && webrtcPeers[peerId]) {
+        if (webrtcPeers[peerId].pc) {
+          try {
+            webrtcPeers[peerId].pc.onicecandidate = null;
+            webrtcPeers[peerId].pc.ontrack = null;
+            webrtcPeers[peerId].pc.close();
+          } catch (e) {}
+        }
+        delete webrtcPeers[peerId];
+      }
+
+      if (peerId) {
+        const cardById = document.getElementById(`webrtcCard_${peerId}`);
+        if (cardById) cardById.remove();
+        if (strip) {
+          strip.querySelectorAll(`[data-peer-id="${peerId}"]`).forEach(el => el.remove());
+        }
+        document.querySelectorAll(`audio[data-livekit-participant="${peerId}"]`).forEach(a => a.remove());
+        const p2pAudio = document.getElementById(`webrtc_audio_${peerId}`);
+        if (p2pAudio) p2pAudio.remove();
+      }
+
+      if (dedupKey && strip) {
+        const hasAnotherActive = Object.keys(webrtcPeers).some(
+          pid => pid !== peerId && getParticipantDedupKey(webrtcPeers[pid]?.name, webrtcPeers[pid]?.role) === dedupKey
+        );
+        if (!hasAnotherActive) {
+          strip.querySelectorAll('[data-student-name]').forEach(el => {
+            if (el.getAttribute('data-student-name') === dedupKey) el.remove();
+          });
+          if (window.__studentLatestPeerByKey && window.__studentLatestPeerByKey[dedupKey] === peerId) {
+            delete window.__studentLatestPeerByKey[dedupKey];
+          }
+        }
+      }
+
+      if (typeof updateMinimizedVideoStripSummary === 'function') {
+        updateMinimizedVideoStripSummary();
+      }
+    }
+
+    function cleanupOrphanStudentVideoCards(activeParticipantKeys) {
+      const strip = document.getElementById('webrtcVideoStrip');
+      Object.keys(webrtcPeers).forEach(pid => {
+        const p = webrtcPeers[pid];
+        if (!p) return;
+        const dedupKey = getParticipantDedupKey(p.name, p.role);
+        if (activeParticipantKeys && dedupKey && !activeParticipantKeys.has(dedupKey)) {
+          removeStudentRemoteVideoCard(pid, p.name, p.role);
+        }
+      });
+
+      if (strip) {
+        const seenKeys = new Set();
+        strip.querySelectorAll('[data-student-name]').forEach(cardEl => {
+          const dKey = cardEl.getAttribute('data-student-name') || '';
+          if (!dKey) return;
+          if (seenKeys.has(dKey)) {
+            cardEl.remove();
+            return;
+          }
+          if (activeParticipantKeys && activeParticipantKeys.size > 0 && !activeParticipantKeys.has(dKey)) {
+            cardEl.remove();
+            return;
+          }
+          seenKeys.add(dKey);
+        });
+      }
+
+      if (typeof updateMinimizedVideoStripSummary === 'function') {
+        updateMinimizedVideoStripSummary();
+      }
+    }
+
+    function ensureRemoteVideoCard(remotePeerId, name, role) {
+      const strip = document.getElementById('webrtcVideoStrip');
+      const remoteContainer = document.getElementById('webrtcRemoteCards') || strip;
+      if (!strip || !remoteContainer || !remotePeerId) return null;
+
+      const resolvedRole = role || ((name && name.includes('Profesor')) || String(remotePeerId).startsWith('host_') ? 'host' : 'student');
+      const resolvedName = (name || (resolvedRole === 'host' ? 'Profesor (Host)' : 'Participante')).trim();
+      const dedupKey = getParticipantDedupKey(resolvedName, resolvedRole);
+      const myCleanName = String(myName || '').trim().toLowerCase();
+
+      if (resolvedRole !== 'host' && dedupKey && dedupKey === myCleanName) {
+        return null;
+      }
+
+      if (dedupKey && remotePeerId !== 'host_presence') {
+        window.__studentLatestPeerByKey[dedupKey] = remotePeerId;
+      }
+
+      let existingCard = document.getElementById(`webrtcCard_${remotePeerId}`)
+        || strip.querySelector(`[data-peer-id="${remotePeerId}"]`);
+
+      if (!existingCard && dedupKey) {
+        const matches = Array.from(strip.querySelectorAll('[data-student-name]'))
+          .filter(el => el.getAttribute('data-student-name') === dedupKey);
+        if (matches.length > 0) {
+          existingCard = matches[0];
+          for (let i = 1; i < matches.length; i++) {
+            matches[i].remove();
+          }
+        }
+      }
+
+      if (existingCard) {
+        existingCard.id = `webrtcCard_${remotePeerId}`;
+        existingCard.setAttribute('data-peer-id', remotePeerId);
+        if (dedupKey) existingCard.setAttribute('data-student-name', dedupKey);
+
+        const videoEl = existingCard.querySelector('video');
+        if (videoEl) {
+          videoEl.setAttribute('playsinline', '');
+          videoEl.setAttribute('webkit-playsinline', '');
+          videoEl.setAttribute('autoplay', '');
+        }
+        const placeholderEl = existingCard.querySelector('[data-role="placeholder"]') || existingCard.querySelectorAll('div')[0];
+        const nameTagEl = existingCard.querySelector('[data-role="name"]') || existingCard.querySelectorAll('div')[2];
+        const micIconEl = existingCard.querySelector('[data-role="mute"]') || existingCard.querySelectorAll('div')[3];
+
+        if (nameTagEl && resolvedName) nameTagEl.textContent = resolvedName;
+
+        if (!webrtcPeers[remotePeerId]) webrtcPeers[remotePeerId] = {};
+        Object.assign(webrtcPeers[remotePeerId], {
+          name: resolvedName,
+          role: resolvedRole,
+          cardEl: existingCard,
+          videoEl: videoEl || webrtcPeers[remotePeerId].videoEl,
+          placeholderEl: placeholderEl || webrtcPeers[remotePeerId].placeholderEl,
+          nameTagEl: nameTagEl || webrtcPeers[remotePeerId].nameTagEl,
+          micIconEl: micIconEl || webrtcPeers[remotePeerId].micIconEl
+        });
+        updateMinimizedVideoStripSummary();
+        return webrtcPeers[remotePeerId];
+      }
+
+      const card = document.createElement('div');
+      card.id = `webrtcCard_${remotePeerId}`;
+      card.setAttribute('data-peer-id', remotePeerId);
+      if (dedupKey) card.setAttribute('data-student-name', dedupKey);
+      card.className = 'relative w-36 h-20 rounded-xl overflow-hidden bg-[#111317] border border-white/10 shrink-0 flex items-center justify-center';
+
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = false;
+      video.setAttribute('playsinline', '');
+      video.setAttribute('webkit-playsinline', '');
+      video.setAttribute('autoplay', '');
+      video.className = 'w-full h-full object-cover hidden';
+
+      const placeholder = document.createElement('div');
+      placeholder.setAttribute('data-role', 'placeholder');
+      placeholder.className = 'flex flex-col items-center justify-center text-slate-400';
+      const initial = (resolvedName || 'P').trim().charAt(0).toUpperCase();
+      const avatarColor = resolvedRole === 'host'
+        ? 'bg-emerald-600/30 border-emerald-400/40 text-emerald-200'
+        : 'bg-[#0e72ed]/30 border-[#0e72ed]/60 text-white';
+      placeholder.innerHTML = `<div class="w-8 h-8 rounded-full ${avatarColor} border flex items-center justify-center font-bold text-xs mb-0.5">${initial}</div>`;
+
+      const nameTag = document.createElement('div');
+      nameTag.setAttribute('data-role', 'name');
+      nameTag.className = 'absolute bottom-1 left-1.5 bg-black/65 backdrop-blur-xs text-white text-[10px] font-medium px-1.5 py-0.5 rounded leading-tight truncate max-w-[90%]';
+      nameTag.textContent = resolvedName;
+
+      const micIcon = document.createElement('div');
+      micIcon.setAttribute('data-role', 'mute');
+      micIcon.className = 'absolute top-1 right-1.5 bg-rose-600/90 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center';
+      micIcon.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
+
+      card.appendChild(video);
+      card.appendChild(placeholder);
+      card.appendChild(nameTag);
+      card.appendChild(micIcon);
+
+      const expandedBody = document.getElementById('webrtcStripExpandedBody') || strip;
+      const localCard = document.getElementById('webrtcLocalCard');
+      if (resolvedRole === 'host') {
+        expandedBody.insertBefore(card, localCard || expandedBody.firstChild);
+      } else {
+        remoteContainer.appendChild(card);
+      }
+
+      if (!webrtcPeers[remotePeerId]) webrtcPeers[remotePeerId] = {};
+      Object.assign(webrtcPeers[remotePeerId], {
+        name: resolvedName,
+        role: resolvedRole,
+        cardEl: card,
+        videoEl: video,
+        placeholderEl: placeholder,
+        nameTagEl: nameTag,
+        micIconEl: micIcon,
+        audioEnabled: false,
+        videoEnabled: false,
+        isSharingScreen: false
+      });
+      updateMinimizedVideoStripSummary();
+      return webrtcPeers[remotePeerId];
+    }
+
+    function syncStudentRemoteScreenShareOverlay() {
+      const overlay = document.getElementById('remoteScreenShareOverlay');
+      const stageVideo = document.getElementById('remoteScreenShareVideo');
+      const stageLabel = document.getElementById('remoteScreenShareLabel');
+      const stopStageBtn = document.getElementById('btnStopScreenShareStage');
+      const restoreStageBtn = document.getElementById('btnRestoreScreenShareStage');
+      if (!overlay || !stageVideo) return;
+
+      const isMinStage = overlay.classList.contains('hidden') && restoreStageBtn && !restoreStageBtn.classList.contains('hidden');
+
+      if (isSharingScreen) {
+        stageVideo.muted = true;
+        if (screenStream && stageVideo.srcObject !== screenStream) {
+          stageVideo.srcObject = screenStream;
+        }
+        stageVideo.play().catch(() => {});
+        if (stageLabel) stageLabel.textContent = '🖥️ Estás compartiendo tu pantalla en vivo';
+        if (stopStageBtn) {
+          stopStageBtn.classList.remove('hidden');
+          stopStageBtn.classList.add('inline-flex');
+        }
+        if (!isMinStage) {
+          overlay.classList.remove('hidden');
+          overlay.classList.add('flex');
+          if (restoreStageBtn) restoreStageBtn.classList.add('hidden');
+        }
+        return;
+      }
+
+      let sharingPeer = Object.values(webrtcPeers).find(p => p && p.isSharingScreen);
+      if (sharingPeer || window.__remoteScreenSharingActive) {
+        const sharerName = (sharingPeer && sharingPeer.name) || window.__remoteScreenSharingName || 'Profesor (Host)';
+        if (stageLabel) {
+          stageLabel.textContent = `🖥️ ${sharerName} está compartiendo pantalla`;
+        }
+        if (currentVideoMode === 'p2p' && sharingPeer && sharingPeer.stream && stageVideo.srcObject !== sharingPeer.stream) {
+          stageVideo.srcObject = sharingPeer.stream;
+          stageVideo.muted = false;
+          stageVideo.setAttribute('playsinline', '');
+          stageVideo.setAttribute('webkit-playsinline', '');
+          stageVideo.setAttribute('autoplay', '');
+          stageVideo.play().catch(() => {});
+        }
+        if (stopStageBtn) {
+          stopStageBtn.classList.add('hidden');
+          stopStageBtn.classList.remove('inline-flex');
+        }
+        if (!isMinStage) {
+          overlay.classList.remove('hidden');
+          overlay.classList.add('flex');
+          if (restoreStageBtn) restoreStageBtn.classList.add('hidden');
+        }
+      } else {
+        if (stageVideo.srcObject) stageVideo.srcObject = null;
+        if (stopStageBtn) {
+          stopStageBtn.classList.add('hidden');
+          stopStageBtn.classList.remove('inline-flex');
+        }
+        overlay.classList.add('hidden');
+        overlay.classList.remove('flex');
+        if (restoreStageBtn) restoreStageBtn.classList.add('hidden');
+      }
+    }
+
+    let lastScreenShareVolume = 0.8;
+
+    function updateScreenShareAudioUI(isMuted, volume) {
+      const icon = document.getElementById('screenShareAudioIcon');
+      const slider = document.getElementById('screenShareAudioVolume');
+      const percent = document.getElementById('screenShareAudioPercent');
+      if (icon) {
+        if (isMuted || volume === 0) {
+          icon.className = 'fa-solid fa-volume-xmark text-rose-400 text-xs';
+        } else if (volume < 0.5) {
+          icon.className = 'fa-solid fa-volume-low text-emerald-400 text-xs';
+        } else {
+          icon.className = 'fa-solid fa-volume-high text-emerald-400 text-xs';
+        }
+      }
+      if (slider && !slider.matches(':active')) {
+        slider.value = isMuted ? 0 : volume;
+      }
+      if (percent) {
+        percent.textContent = `${Math.round((isMuted ? 0 : volume) * 100)}%`;
+      }
+    }
+
+    document.getElementById('btnToggleScreenShareAudio')?.addEventListener('click', () => {
+      const stageVideo = document.getElementById('remoteScreenShareVideo');
+      const slider = document.getElementById('screenShareAudioVolume');
+      if (!stageVideo) return;
+      if (stageVideo.muted || stageVideo.volume === 0) {
+        const targetVol = lastScreenShareVolume > 0 ? lastScreenShareVolume : 0.8;
+        stageVideo.muted = false;
+        stageVideo.volume = targetVol;
+        if (slider) slider.value = targetVol;
+        updateScreenShareAudioUI(false, targetVol);
+      } else {
+        lastScreenShareVolume = stageVideo.volume || 0.8;
+        stageVideo.muted = true;
+        stageVideo.volume = 0;
+        if (slider) slider.value = 0;
+        updateScreenShareAudioUI(true, 0);
+      }
+    });
+
+    document.getElementById('screenShareAudioVolume')?.addEventListener('input', (e) => {
+      const stageVideo = document.getElementById('remoteScreenShareVideo');
+      if (!stageVideo) return;
+      const val = parseFloat(e.target.value) || 0;
+      if (val > 0) {
+        stageVideo.muted = false;
+        stageVideo.volume = val;
+        lastScreenShareVolume = val;
+        updateScreenShareAudioUI(false, val);
+      } else {
+        stageVideo.muted = true;
+        stageVideo.volume = 0;
+        updateScreenShareAudioUI(true, 0);
+      }
+    });
+
+    window.minimizeStudentScreenShareStage = function() {
+      const overlay = document.getElementById('remoteScreenShareOverlay');
+      const restoreBtn = document.getElementById('btnRestoreScreenShareStage');
+      if (overlay) {
+        overlay.classList.add('hidden');
+        overlay.classList.remove('flex');
+      }
+      const hasSharing = Boolean(isSharingScreen || window.__remoteScreenSharingActive || Object.values(webrtcPeers).some(p => p.isSharingScreen));
+      if (restoreBtn && hasSharing) {
+        restoreBtn.classList.remove('hidden');
+      }
+    };
+
+    window.restoreStudentScreenShareStage = function() {
+      const overlay = document.getElementById('remoteScreenShareOverlay');
+      const restoreBtn = document.getElementById('btnRestoreScreenShareStage');
+      if (restoreBtn) restoreBtn.classList.add('hidden');
+      if (overlay) {
+        overlay.classList.remove('hidden');
+        overlay.classList.add('flex');
+      }
+    };
+
     function setupWebRTCSignaling(channel) {
       if (!channel) return;
+
+      channel.on('broadcast', { event: 'VIDEO_MODE_CONFIG' }, async ({ payload }) => {
+        if (!payload || !payload.videoMode) return;
+        const targetMode = payload.videoMode === 'livekit' ? 'livekit' : 'p2p';
+        if (targetMode !== currentVideoMode) {
+          console.log('[ELT Live] Cambio dinámico de modo de video recibido del Host:', targetMode);
+          await startStudentVideoEngine(targetMode);
+        }
+      });
+
+      channel.on('broadcast', { event: 'WEBRTC_JOIN' }, async ({ payload }) => {
+        if (!payload) return;
+        if (payload.videoMode && payload.videoMode !== currentVideoMode && isAdmittedToClass) {
+          await startStudentVideoEngine(payload.videoMode);
+        }
+        const fromId = payload.peerId || payload.fromPeerId || payload.from;
+        if (!fromId || fromId === webrtcPeerId) return;
+        const remoteName = payload.name || payload.fromName || 'Profesor (Host)';
+        const remoteRole = payload.role || (fromId.startsWith('host_') || remoteName.includes('Profesor') ? 'host' : 'student');
+
+        if (currentVideoMode === 'p2p') {
+          const pc = getOrCreateP2PPeerConnection(fromId, remoteName, remoteRole);
+          if (webrtcPeers[fromId]) {
+            webrtcPeers[fromId].audioEnabled = Boolean(payload.audioEnabled ?? payload.audio);
+            webrtcPeers[fromId].videoEnabled = Boolean(payload.videoEnabled ?? payload.video);
+            webrtcPeers[fromId].isSharingScreen = Boolean(payload.isSharingScreen);
+          }
+          updateStudentRemotePeerCardMedia(fromId);
+        } else {
+          ensureRemoteVideoCard(fromId, remoteName, remoteRole);
+        }
+      });
+
+      channel.on('broadcast', { event: 'WEBRTC_ANNOUNCE' }, async ({ payload }) => {
+        if (!payload) return;
+        if (payload.videoMode && payload.videoMode !== currentVideoMode && isAdmittedToClass) {
+          await startStudentVideoEngine(payload.videoMode);
+        }
+        const fromId = payload.fromPeerId || payload.from || payload.peerId;
+        const toId = payload.toPeerId || payload.to;
+        if (!fromId || fromId === webrtcPeerId) return;
+        if (toId && toId !== webrtcPeerId) return;
+        const remoteName = payload.fromName || payload.name || 'Profesor (Host)';
+        const remoteRole = payload.role || (fromId.startsWith('host_') || remoteName.includes('Profesor') ? 'host' : 'student');
+
+        if (currentVideoMode === 'p2p') {
+          const pc = getOrCreateP2PPeerConnection(fromId, remoteName, remoteRole);
+          if (webrtcPeers[fromId]) {
+            webrtcPeers[fromId].audioEnabled = Boolean(payload.audioEnabled ?? payload.audio);
+            webrtcPeers[fromId].videoEnabled = Boolean(payload.videoEnabled ?? payload.video);
+            webrtcPeers[fromId].isSharingScreen = Boolean(payload.isSharingScreen);
+          }
+          updateStudentRemotePeerCardMedia(fromId);
+        } else {
+          ensureRemoteVideoCard(fromId, remoteName, remoteRole);
+        }
+      });
+
+      channel.on('broadcast', { event: 'WEBRTC_OFFER' }, async ({ payload }) => {
+        if (currentVideoMode !== 'p2p') return;
+        const fromId = payload && (payload.fromPeerId || payload.from);
+        const toId = payload && (payload.toPeerId || payload.to);
+        if (!fromId || toId !== webrtcPeerId || fromId === webrtcPeerId) return;
+
+        try {
+          const remoteName = payload.fromName || payload.name || 'Profesor (Host)';
+          const remoteRole = payload.role || 'host';
+          const pc = getOrCreateP2PPeerConnection(fromId, remoteName, remoteRole);
+          if (!pc) return;
+
+          if (webrtcPeers[fromId]) {
+            webrtcPeers[fromId].audioEnabled = Boolean(payload.audioEnabled ?? payload.audio);
+            webrtcPeers[fromId].videoEnabled = Boolean(payload.videoEnabled ?? payload.video);
+            webrtcPeers[fromId].isSharingScreen = Boolean(payload.isSharingScreen);
+          }
+
+          if (pc.signalingState !== 'stable') {
+            try { await pc.setLocalDescription({ type: 'rollback' }); } catch (rb) {}
+          }
+
+          await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          channel.send({
+            type: 'broadcast',
+            event: 'WEBRTC_ANSWER',
+            payload: {
+              fromPeerId: webrtcPeerId,
+              from: webrtcPeerId,
+              fromName: getMyDisplayNameForWebRTC(),
+              name: getMyDisplayNameForWebRTC(),
+              role: 'student',
+              toPeerId: fromId,
+              to: fromId,
+              sdp: pc.localDescription,
+              audioEnabled: webrtcAudioEnabled,
+              videoEnabled: webrtcVideoEnabled,
+              isSharingScreen: isSharingScreen
+            }
+          });
+
+          updateStudentRemotePeerCardMedia(fromId);
+        } catch (e) {
+          console.warn('[P2P] Error respondiendo oferta en Estudiante:', e);
+        }
+      });
+
+      channel.on('broadcast', { event: 'WEBRTC_ANSWER' }, async ({ payload }) => {
+        if (currentVideoMode !== 'p2p') return;
+        const fromId = payload && (payload.fromPeerId || payload.from);
+        const toId = payload && (payload.toPeerId || payload.to);
+        if (!fromId || toId !== webrtcPeerId || fromId === webrtcPeerId) return;
+
+        try {
+          const peerObj = webrtcPeers[fromId];
+          if (peerObj && peerObj.pc && peerObj.pc.signalingState === 'have-local-offer') {
+            await peerObj.pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+            updateStudentRemotePeerCardMedia(fromId);
+          }
+        } catch (e) {
+          console.warn('[P2P] Error aplicando respuesta en Estudiante:', e);
+        }
+      });
+
+      channel.on('broadcast', { event: 'WEBRTC_ICE' }, async ({ payload }) => {
+        if (currentVideoMode !== 'p2p') return;
+        const fromId = payload && (payload.fromPeerId || payload.from);
+        const toId = payload && (payload.toPeerId || payload.to);
+        if (!fromId || toId !== webrtcPeerId || fromId === webrtcPeerId) return;
+
+        try {
+          const peerObj = webrtcPeers[fromId];
+          if (peerObj && peerObj.pc && payload.candidate && peerObj.pc.remoteDescription) {
+            await peerObj.pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          }
+        } catch (e) {}
+      });
+
       channel.on('broadcast', { event: 'WEBRTC_MEDIA_STATE' }, ({ payload }) => {
         const remoteId = payload && (payload.peerId || payload.fromPeerId || payload.from);
         if (!remoteId || remoteId === webrtcPeerId) return;
@@ -5639,29 +6269,23 @@
         }
         syncStudentRemoteScreenShareOverlay();
       });
-    }
 
-    function announceWebRTCPresence() {
-      if (!myChannel) return;
-      myChannel.send({
-        type: 'broadcast',
-        event: 'WEBRTC_JOIN',
-        payload: {
-          peerId: webrtcPeerId,
-          name: getMyDisplayNameForWebRTC(),
-          role: 'student',
-          audioEnabled: webrtcAudioEnabled,
-          videoEnabled: webrtcVideoEnabled,
-          audio: webrtcAudioEnabled,
-          video: webrtcVideoEnabled,
-          isSharingScreen: isSharingScreen
-        }
+      channel.on('broadcast', { event: 'WEBRTC_LEAVE' }, ({ payload }) => {
+        const remoteId = payload && (payload.peerId || payload.fromPeerId || payload.from);
+        if (!remoteId || remoteId === webrtcPeerId) return;
+        removeStudentRemoteVideoCard(remoteId, payload.name, payload.role);
       });
     }
 
     window.addEventListener('beforeunload', () => {
       if (livekitRoom) {
         try { livekitRoom.disconnect(); } catch (e) {}
+      }
+      if (typeof closeAllP2PConnections === 'function') {
+        closeAllP2PConnections();
+      }
+      if (p2pLocalStream) {
+        try { p2pLocalStream.getTracks().forEach(t => t.stop()); } catch (e) {}
       }
     });
 
@@ -5950,7 +6574,18 @@
         livekitRoom = null;
       }
 
-      // 2. Notificar salida y desuscribirse del canal de Supabase
+      // 2. Cerrar todas las conexiones P2P y liberar stream local P2P
+      if (typeof closeAllP2PConnections === 'function') {
+        closeAllP2PConnections();
+      }
+      if (typeof p2pLocalStream !== 'undefined' && p2pLocalStream) {
+        try {
+          p2pLocalStream.getTracks().forEach(t => t.stop());
+        } catch (e) {}
+        p2pLocalStream = null;
+      }
+
+      // 3. Notificar salida y desuscribirse del canal de Supabase
       if (typeof myChannel !== 'undefined' && myChannel) {
         try {
           await myChannel.send({
@@ -5966,7 +6601,7 @@
         myChannel = null;
       }
 
-      // 3. Detener pistas de pantalla compartida si existían
+      // 4. Detener pistas de pantalla compartida si existían
       if (typeof screenStream !== 'undefined' && screenStream) {
         try {
           screenStream.getTracks().forEach(t => t.stop());
@@ -5974,13 +6609,13 @@
         screenStream = null;
       }
 
-      // 4. Limpiar intervalos activos
+      // 5. Limpiar intervalos activos
       if (typeof waitingRoomPingInterval !== 'undefined' && waitingRoomPingInterval) {
         clearInterval(waitingRoomPingInterval);
         waitingRoomPingInterval = null;
       }
 
-      // 5. Restablecer banderas de estado de la sala
+      // 6. Restablecer banderas de estado de la sala
       isAdmittedToClass = false;
       currentRoomPin = null;
       webrtcAudioEnabled = false;
@@ -5988,7 +6623,7 @@
       isSharingScreen = false;
       window.__remoteScreenSharingActive = false;
 
-      // 6. Limpiar elementos de video/audio del DOM
+      // 7. Limpiar elementos de video/audio del DOM
       const localVideo = document.getElementById('webrtcLocalVideo');
       if (localVideo) {
         localVideo.srcObject = null;
@@ -6018,6 +6653,7 @@
         strip.querySelectorAll('[data-peer-id]').forEach(el => el.remove());
       }
       document.querySelectorAll('audio[data-livekit-participant]').forEach(a => a.remove());
+      document.querySelectorAll('audio[data-p2p-peer]').forEach(a => a.remove());
 
       if (typeof webrtcPeers === 'object' && webrtcPeers) {
         Object.keys(webrtcPeers).forEach(k => delete webrtcPeers[k]);
@@ -6027,7 +6663,7 @@
         updateLocalMediaUI();
       }
 
-      // 7. Regresar limpiamente a la pantalla inicial de ingreso por PIN
+      // 8. Regresar limpiamente a la pantalla inicial de ingreso por PIN
       document.getElementById('liveScreen')?.classList.add('hidden');
       document.getElementById('waitingRoomScreen')?.classList.add('hidden');
       document.getElementById('joinScreen')?.classList.remove('hidden');
@@ -6109,10 +6745,18 @@
       showBottomMeetingBarTemporarily();
       setPushToTalkVisualState(true);
 
-      if (livekitRoom) {
+      if (currentVideoMode === 'livekit' && livekitRoom) {
         try {
           await livekitRoom.localParticipant.setMicrophoneEnabled(true);
         } catch (e) {}
+      } else if (currentVideoMode === 'p2p') {
+        if (!p2pLocalStream) {
+          await ensureP2PLocalStream(true, webrtcVideoEnabled);
+        }
+        if (p2pLocalStream) {
+          p2pLocalStream.getAudioTracks().forEach(t => { t.enabled = true; });
+        }
+        await syncP2PTracksToAllPeers();
       }
       webrtcAudioEnabled = true;
       updateLocalMediaUI();
@@ -6123,10 +6767,15 @@
     function deactivateStudentPushToTalk() {
       if (!isPushToTalkActive) return;
       isPushToTalkActive = false;
-      if (livekitRoom) {
+      if (currentVideoMode === 'livekit' && livekitRoom) {
         try {
           livekitRoom.localParticipant.setMicrophoneEnabled(false);
         } catch (e) {}
+      } else if (currentVideoMode === 'p2p') {
+        if (p2pLocalStream) {
+          p2pLocalStream.getAudioTracks().forEach(t => { t.enabled = false; });
+        }
+        syncP2PTracksToAllPeers();
       }
       webrtcAudioEnabled = false;
       setPushToTalkVisualState(false);
