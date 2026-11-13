@@ -193,7 +193,42 @@
       scrollbar-width: none;
     }
 
-</style>
+
+    /* Reducción drástica del dock flotante en Modo Jitsi (260px x 150px) */
+    #webrtcVideoStrip.jitsi-mode {
+      max-width: 280px !important;
+      width: auto !important;
+      padding: 4px !important;
+      border-radius: 12px !important;
+    }
+    #webrtcVideoStrip.jitsi-mode #jitsiDockContainer {
+      width: 260px !important;
+      height: 150px !important;
+      max-width: 260px !important;
+      max-height: 150px !important;
+      border-radius: 8px !important;
+      overflow: hidden !important;
+    }
+    #webrtcVideoStrip.jitsi-mode #webrtcStripExpandedBody {
+      overflow: hidden !important;
+      padding-right: 0 !important;
+      gap: 4px !important;
+    }
+    @media (max-width: 640px) {
+      #webrtcVideoStrip.jitsi-mode {
+        max-width: 95vw !important;
+        width: auto !important;
+      }
+      #webrtcVideoStrip.jitsi-mode #jitsiDockContainer {
+        width: 260px !important;
+        height: 150px !important;
+        max-width: 260px !important;
+        max-height: 150px !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
+      }
+    }
+  </style>
 </head>
 <body class="font-sans flex flex-col h-screen w-screen bg-slate-950">
 
@@ -332,7 +367,7 @@
               <i class="fa-solid fa-grip-vertical text-xs"></i>
             </div>
             <!-- Contenedor Jitsi Meet SFU embebido (Modo Gratis) -->
-            <div id="jitsiDockContainer" class="w-full sm:w-[320px] h-[155px] sm:h-[185px] max-w-[320px] max-h-[185px] rounded-xl overflow-hidden bg-black flex-shrink-0 hidden"></div>
+            <div id="jitsiDockContainer" style="width: 260px; height: 150px; max-width: 260px; max-height: 150px; border-radius: 8px; overflow: hidden;" class="w-[260px] h-[150px] max-w-[260px] max-h-[150px] rounded-lg overflow-hidden bg-black flex-shrink-0 hidden"></div>
             <!-- Miniatura Local (Estudiante) -->
             <div id="webrtcLocalCard" class="relative w-36 h-20 rounded-xl overflow-hidden bg-[#111317] border border-white/10 flex-shrink-0 flex items-center justify-center group">
               <video id="webrtcLocalVideo" autoplay playsinline webkit-playsinline muted class="w-full h-full object-cover transform scale-x-[-1] hidden"></video>
@@ -4972,10 +5007,11 @@
               displayName: displayName || 'Alumno'
             },
             configOverwrite: {
+              disableDeepLinking: true,
               prejoinPageEnabled: false,
               startWithAudioMuted: true,
               startWithVideoMuted: true,
-              disableDeepLinking: true,
+              toolbarButtons: ['microphone', 'camera'],
               resolution: 360,
               constraints: {
                 video: {
@@ -4987,7 +5023,7 @@
               SHOW_JITSI_WATERMARK: false,
               SHOW_WATERMARK_FOR_GUESTS: false,
               MOBILE_APP_PROMO: false,
-              TOOLBAR_BUTTONS: ['microphone', 'camera', 'tileview', 'fullscreen']
+              TOOLBAR_BUTTONS: ['microphone', 'camera']
             }
           };
 
@@ -5948,6 +5984,8 @@
           jitsiContainer.classList.add('hidden');
           jitsiContainer.innerHTML = '';
         }
+        const stripLK = document.getElementById('webrtcVideoStrip');
+        if (stripLK) stripLK.classList.remove('jitsi-mode');
         if (localCard) localCard.classList.remove('hidden');
         if (remoteCards) remoteCards.classList.remove('hidden');
         const expandedBodyLK = document.getElementById('webrtcStripExpandedBody');
@@ -5971,6 +6009,9 @@
         if (expandedBody) {
           expandedBody.querySelectorAll('[data-peer-id], [data-student-name]').forEach(c => c.classList.add('hidden'));
         }
+
+        const strip = document.getElementById('webrtcVideoStrip');
+        if (strip) strip.classList.add('jitsi-mode');
 
         if (jitsiContainer) {
           jitsiContainer.classList.remove('hidden');
