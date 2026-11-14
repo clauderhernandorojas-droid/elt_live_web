@@ -194,60 +194,7 @@
     }
 
 
-    /* Reducción drástica del dock flotante en Modo Jitsi (260px x 150px) */
-    /* Reducción drástica del dock flotante en Modo Jitsi (185px x 110px por defecto) */
-    #webrtcVideoStrip.jitsi-mode {
-      max-width: 205px !important;
-      width: auto !important;
-      padding: 3px !important;
-      border-radius: 10px !important;
-      transition: max-width 0.2s ease, padding 0.2s ease;
-    }
-    #webrtcVideoStrip.jitsi-mode #jitsiDockContainer {
-      width: 185px !important;
-      height: 110px !important;
-      max-width: 185px !important;
-      max-height: 110px !important;
-      border-radius: 8px !important;
-      overflow: hidden !important;
-      transition: width 0.2s ease, height 0.2s ease, max-width 0.2s ease, max-height 0.2s ease;
-    }
-    #webrtcVideoStrip.jitsi-mode #webrtcStripExpandedBody {
-      overflow: hidden !important;
-      padding-right: 0 !important;
-      gap: 3px !important;
-    }
-    /* Expansión temporal para interactuar con botones o login de Jitsi */
-    #webrtcVideoStrip.jitsi-mode.jitsi-expanded {
-      max-width: 360px !important;
-      width: auto !important;
-    }
-    #webrtcVideoStrip.jitsi-mode.jitsi-expanded #jitsiDockContainer {
-      width: 340px !important;
-      height: 240px !important;
-      max-width: 340px !important;
-      max-height: 240px !important;
-    }
-    @media (max-width: 640px) {
-      #webrtcVideoStrip.jitsi-mode {
-        max-width: 95vw !important;
-        width: auto !important;
-      }
-      #webrtcVideoStrip.jitsi-mode #jitsiDockContainer {
-        width: 185px !important;
-        height: 110px !important;
-        max-width: 185px !important;
-        max-height: 110px !important;
-        border-radius: 8px !important;
-        overflow: hidden !important;
-      }
-      #webrtcVideoStrip.jitsi-mode.jitsi-expanded #jitsiDockContainer {
-        width: min(340px, 92vw) !important;
-        height: 220px !important;
-        max-width: min(340px, 92vw) !important;
-        max-height: 220px !important;
-      }
-    }
+    
   </style>
 </head>
 <body class="font-sans flex flex-col h-screen w-screen bg-slate-950">
@@ -386,8 +333,6 @@
             <div id="webrtcDragHandle" class="flex flex-col items-center justify-center px-1 py-2 text-slate-500 hover:text-slate-300 cursor-move shrink-0" title="Arrastrar cámaras">
               <i class="fa-solid fa-grip-vertical text-xs"></i>
             </div>
-            <!-- Contenedor Jitsi Meet SFU embebido (Modo Gratis) -->
-            <div id="jitsiDockContainer" style="width: 185px; height: 110px; max-width: 185px; max-height: 110px; border-radius: 8px; overflow: hidden;" class="w-[185px] h-[110px] max-w-[185px] max-h-[110px] rounded-lg overflow-hidden bg-black flex-shrink-0 hidden"></div>
             <!-- Miniatura Local (Estudiante) -->
             <div id="webrtcLocalCard" class="relative w-36 h-20 rounded-xl overflow-hidden bg-[#111317] border border-white/10 flex-shrink-0 flex items-center justify-center group">
               <video id="webrtcLocalVideo" autoplay playsinline webkit-playsinline muted class="w-full h-full object-cover transform scale-x-[-1] hidden"></video>
@@ -410,10 +355,7 @@
             </div>
             <!-- Contenedor Dinámico para Miniaturas Remotas (Profesor y compañeros) -->
             <div id="webrtcRemoteCards" class="flex items-center gap-2"></div>
-            <!-- Botones Expandir y Minimizar Cámaras -->
-            <button id="btnToggleExpandJitsi" type="button" onclick="event.stopPropagation(); toggleJitsiExpandedSize()" class="self-start -mt-0.5 ml-0.5 w-6 h-6 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center text-xs font-bold transition shrink-0 cursor-pointer" title="Expandir / Reducir tamaño de video">
-              ⤢
-            </button>
+            <!-- Botón Minimizar Cámaras -->
             <button id="btnMinimizeVideoStrip" type="button" onclick="event.stopPropagation(); setVideoStripMinimized(true)" class="self-start -mt-0.5 ml-0.5 w-6 h-6 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center text-xs font-bold transition shrink-0 cursor-pointer" title="Minimizar recuadro de cámaras">
               —
             </button>
@@ -2036,9 +1978,7 @@
           if (!u) return;
 
           if (key === 'host' || u.role === 'host') {
-            if (u.vdoRoom) currentVDORoomName = u.vdoRoom;
-            if (u.jitsiRoomName) currentVDORoomName = u.jitsiRoomName;
-            const hMode = (u.videoMode === 'livekit' || u.videoEngine === 'livekit') ? 'livekit' : 'vdo';
+            const hMode = (u.videoMode === 'livekit' || u.videoEngine === 'livekit') ? 'livekit' : 'p2p';
             if (hMode !== currentVideoMode && isAdmittedToClass) {
               if (typeof startStudentVideoEngine === 'function') {
                 startStudentVideoEngine(hMode);
@@ -2125,14 +2065,11 @@
         const targetName = (payload.studentName || '').trim().toLowerCase();
         const currentName = (myName || '').trim().toLowerCase();
 
-        if (payload.vdoRoom) currentVDORoomName = payload.vdoRoom;
-        if (payload.jitsiRoomName) currentVDORoomName = payload.jitsiRoomName;
-
         if (!isAdmittedToClass) {
           // Admitir solo si coincide con el studentId o studentName de este alumno
           if ((targetId && targetId === myStudentId) || (targetName && targetName === currentName)) {
             if (payload.videoMode || payload.videoEngine) {
-              assignedVideoMode = (payload.videoMode === 'livekit' || payload.videoEngine === 'livekit') ? 'livekit' : 'vdo';
+              assignedVideoMode = (payload.videoMode === 'livekit' || payload.videoEngine === 'livekit') ? 'livekit' : 'p2p';
             }
             playGentleNotificationBeep();
             admitStudentToClass();
@@ -4960,61 +4897,29 @@
     // ==================== ARQUITECTURA DUAL DE VIDEO: P2P GRATIS ILIMITADO / LIVEKIT SFU ====================
     let currentVideoMode = 'p2p'; // 'p2p' | 'livekit' (controlado automáticamente por el profesor de la sala)
 
-    // Configuración STUN + TURN OpenRelay gratuito para conexiones P2P sin cuota
+    // Configuración STUN + TURN OpenRelay gratuito para conexiones WebRTC Nativas
     const WEBRTC_ICE_SERVERS = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' },
         {
           urls: [
             'turn:openrelay.metered.ca:80',
             'turn:openrelay.metered.ca:443',
-            'turn:openrelay.metered.ca:443?transport=tcp',
             'turns:openrelay.metered.ca:443?transport=tcp'
           ],
-          username: 'openrelay',
-          credential: 'openrelay'
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         }
       ],
       iceCandidatePoolSize: 10
     };
 
-    // Estados de Conexión LiveKit Cloud SFU y VDO.Ninja SFU
+    // Estados de Conexión LiveKit Cloud SFU y P2P Nativo
     let livekitRoom = null;
     let livekitUrl = null;
     let livekitToken = null;
     let isConnectingLiveKit = false;
-
-    let currentVDORoomName = null;
-
-    function mountVDONinjaStudent(containerEl, vdoRoom, displayName) {
-      if (!containerEl || !vdoRoom) return null;
-      containerEl.innerHTML = '';
-
-      const safeName = displayName || myName || 'Alumno';
-      const rand = Math.floor(Math.random() * 999);
-      const pushParam = `Stu_${encodeURIComponent(safeName)}_${rand}`;
-      const labelParam = encodeURIComponent(safeName);
-
-      const iframeUrl = `https://vdo.ninja/?room=${encodeURIComponent(vdoRoom)}&push=${pushParam}&label=${labelParam}&webcam&mic&selfview&quality=2&autostart&cleanoutput&nocontrols&noheader&nosettings&nochat&nofileshare&hidehome`;
-
-      const iframe = document.createElement('iframe');
-      iframe.src = iframeUrl;
-      iframe.style.width = '100%';
-      iframe.style.height = '100%';
-      iframe.style.border = '0';
-      iframe.style.pointerEvents = 'none';
-      iframe.setAttribute('allow', 'camera *; microphone *; fullscreen *; display-capture *; autoplay *');
-      containerEl.appendChild(iframe);
-
-      // Al montar con &webcam&mic, sincronizar estado activo en la barra inferior
-      webrtcAudioEnabled = true;
-      webrtcVideoEnabled = true;
-
-      return iframe;
-    }
 
     // Estados de Conexión WebRTC P2P Directo
     let p2pLocalStream = null;
@@ -5448,18 +5353,23 @@
         return null;
       }
       try {
+        const participantCount = Object.keys(webrtcPeers).length + 1;
+        const idealWidth = participantCount >= 3 ? 320 : 480;
+        const idealHeight = participantCount >= 3 ? 240 : 360;
+        const idealFps = participantCount >= 3 ? 15 : 20;
+
         if (!p2pLocalStream) {
           let stream = null;
           if (wantVideo) {
-            // Nivel 1: Constraints ideales para móvil (480x360@20fps frontal)
+            // Nivel 1: Constraints adaptadas según número de participantes
             try {
               stream = await navigator.mediaDevices.getUserMedia({
                 audio: Boolean(wantAudio),
                 video: {
                   facingMode: 'user',
-                  width: { ideal: 480 },
-                  height: { ideal: 360 },
-                  frameRate: { max: 20 }
+                  width: { ideal: idealWidth },
+                  height: { ideal: idealHeight },
+                  frameRate: { ideal: idealFps, max: idealFps }
                 }
               });
             } catch (err1) {
@@ -5520,9 +5430,9 @@
               vStream = await navigator.mediaDevices.getUserMedia({
                 video: {
                   facingMode: 'user',
-                  width: { ideal: 480 },
-                  height: { ideal: 360 },
-                  frameRate: { max: 20 }
+                  width: { ideal: idealWidth },
+                  height: { ideal: idealHeight },
+                  frameRate: { ideal: idealFps, max: idealFps }
                 }
               });
             } catch (errFallback1) {
@@ -5548,6 +5458,13 @@
               originalCamTrack = p2pLocalStream.getVideoTracks()[0] || null;
             }
           }
+        }
+
+        // Si ya hay pista activa y hay 3+ participantes, aplicar constraints en vivo
+        if (p2pLocalStream && originalCamTrack && participantCount >= 3 && originalCamTrack.applyConstraints) {
+          try {
+            await originalCamTrack.applyConstraints({ width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15, max: 15 } });
+          } catch (e) {}
         }
 
         try { handleP2PLocalVideoUI(); } catch (e) {}
@@ -5661,8 +5578,6 @@
     }
 
     function getOrCreateP2PPeerConnection(remotePeerId, remoteName, remoteRole) {
-      // P2P desactivado en favor de Jitsi SFU y LiveKit SFU
-      return null;
       if (webrtcPeers[remotePeerId] && webrtcPeers[remotePeerId].pc) {
         const st = webrtcPeers[remotePeerId].pc.connectionState;
         if (st !== 'closed' && st !== 'failed') {
@@ -5929,11 +5844,11 @@
 
     // ==================== INICIALIZADOR Y CONTROLES UNIFICADOS (P2P / LIVEKIT) ====================
     async function startStudentVideoEngine(mode) {
-      const targetMode = (mode === 'livekit') ? 'livekit' : 'vdo';
+      const targetMode = (mode === 'livekit') ? 'livekit' : 'p2p';
       assignedVideoMode = targetMode;
       currentVideoMode = targetMode;
 
-      // PROHIBIDO iniciar motor de video o conectar VDO.Ninja mientras el estudiante esté en Sala de Espera
+      // PROHIBIDO iniciar motor de video mientras el estudiante esté en Sala de Espera
       if (!isAdmittedToClass) {
         console.log('[ELT Live] Modo de video configurado a', targetMode, '— retenido en Sala de Espera hasta aprobación del profesor.');
         return;
@@ -5941,48 +5856,23 @@
 
       console.log('[ELT Live] Inicializando motor de video Estudiante:', targetMode, '(Admitido:', isAdmittedToClass, ')');
 
-      const jitsiContainer = document.getElementById('jitsiDockContainer');
       const localCard = document.getElementById('webrtcLocalCard');
       const remoteCards = document.getElementById('webrtcRemoteCards');
+      if (localCard) localCard.classList.remove('hidden');
+      if (remoteCards) remoteCards.classList.remove('hidden');
 
       if (targetMode === 'livekit') {
-        if (jitsiContainer) {
-          jitsiContainer.classList.add('hidden');
-          jitsiContainer.innerHTML = '';
-        }
-        const stripLK = document.getElementById('webrtcVideoStrip');
-        if (stripLK) stripLK.classList.remove('jitsi-mode');
-        if (localCard) localCard.classList.remove('hidden');
-        if (remoteCards) remoteCards.classList.remove('hidden');
-        const expandedBodyLK = document.getElementById('webrtcStripExpandedBody');
-        if (expandedBodyLK) {
-          expandedBodyLK.querySelectorAll('[data-peer-id], [data-student-name]').forEach(c => c.classList.remove('hidden'));
-        }
-
         if (currentRoomPin) {
           await connectLiveKit(currentRoomPin, myName || 'Alumno', false);
         }
       } else {
-        // Modo Gratis VDO.Ninja SFU
+        // Modo Gratis WebRTC Nativo (P2P)
         if (livekitRoom) {
           try { await livekitRoom.disconnect(); } catch (e) {}
           livekitRoom = null;
         }
-        if (localCard) localCard.classList.add('hidden');
-        if (remoteCards) remoteCards.classList.add('hidden');
-
-        const expandedBody = document.getElementById('webrtcStripExpandedBody');
-        if (expandedBody) {
-          expandedBody.querySelectorAll('[data-peer-id], [data-student-name]').forEach(c => c.classList.add('hidden'));
-        }
-
-        const strip = document.getElementById('webrtcVideoStrip');
-        if (strip) strip.classList.add('jitsi-mode');
-
-        if (jitsiContainer) {
-          jitsiContainer.classList.remove('hidden');
-          const vRoom = currentVDORoomName || ('ELTLive' + (currentRoomPin || '0000') + 'room');
-          mountVDONinjaStudent(jitsiContainer, vRoom, myName || 'Alumno');
+        if (typeof announceWebRTCPresence === 'function') {
+          announceWebRTCPresence();
         }
       }
       updateLocalMediaUI();
@@ -5998,14 +5888,14 @@
           webrtcAudioEnabled = !webrtcAudioEnabled;
           showMediaAlert('No se pudo acceder al micrófono: ' + (err.message || err.name || err));
         }
-      } else if (currentVideoMode === 'vdo' || currentVideoMode === 'jitsi' || currentVideoMode === 'p2p') {
-        const jContainer = document.getElementById('jitsiDockContainer');
-        const vdoIframe = jContainer ? jContainer.querySelector('iframe') : null;
-        if (vdoIframe && vdoIframe.contentWindow) {
-          try {
-            vdoIframe.contentWindow.postMessage({ mic: webrtcAudioEnabled }, '*');
-          } catch (e) {}
+      } else if (currentVideoMode === 'p2p') {
+        if (!p2pLocalStream) {
+          await ensureP2PLocalStream(webrtcAudioEnabled, webrtcVideoEnabled);
         }
+        if (p2pLocalStream) {
+          p2pLocalStream.getAudioTracks().forEach(t => { t.enabled = webrtcAudioEnabled; });
+        }
+        await syncP2PTracksToAllPeers();
       }
       updateLocalMediaUI();
       broadcastWebRTCMediaState();
@@ -6032,14 +5922,15 @@
             webrtcVideoEnabled = !webrtcVideoEnabled;
             showMediaAlert('No se pudo encender la cámara frontal: ' + (err.message || err.name || err));
           }
-        } else if (currentVideoMode === 'vdo' || currentVideoMode === 'jitsi' || currentVideoMode === 'p2p') {
-          const jContainer = document.getElementById('jitsiDockContainer');
-          const vdoIframe = jContainer ? jContainer.querySelector('iframe') : null;
-          if (vdoIframe && vdoIframe.contentWindow) {
-            try {
-              vdoIframe.contentWindow.postMessage({ camera: webrtcVideoEnabled }, '*');
-            } catch (e) {}
+        } else if (currentVideoMode === 'p2p') {
+          if (!p2pLocalStream) {
+            await ensureP2PLocalStream(webrtcAudioEnabled, webrtcVideoEnabled);
           }
+          if (p2pLocalStream) {
+            p2pLocalStream.getVideoTracks().forEach(t => { t.enabled = webrtcVideoEnabled; });
+          }
+          try { handleP2PLocalVideoUI(); } catch (e) {}
+          await syncP2PTracksToAllPeers();
         }
       } catch (fatalCamErr) {
         console.error('[toggleLocalVideo] Error atrapado y blindado:', fatalCamErr);
@@ -6254,7 +6145,7 @@
       const strip = document.getElementById('webrtcVideoStrip');
       const remoteContainer = document.getElementById('webrtcRemoteCards') || strip;
       if (!strip || !remoteContainer || !remotePeerId) return null;
-      if (currentVideoMode === 'vdo' || currentVideoMode === 'jitsi') return null;
+      
 
       const resolvedRole = role || ((name && name.includes('Profesor')) || String(remotePeerId).startsWith('host_') ? 'host' : 'student');
       const resolvedName = (name || (resolvedRole === 'host' ? 'Profesor (Host)' : 'Participante')).trim();
@@ -6528,12 +6419,10 @@
 
       channel.on('broadcast', { event: 'VIDEO_MODE_CONFIG' }, async ({ payload }) => {
         if (!payload) return;
-        const targetMode = (payload.videoMode === 'livekit' || payload.videoEngine === 'livekit') ? 'livekit' : 'vdo';
+        const targetMode = (payload.videoMode === 'livekit' || payload.videoEngine === 'livekit') ? 'livekit' : 'p2p';
         assignedVideoMode = targetMode;
         currentVideoMode = targetMode;
-        if (payload.vdoRoom) currentVDORoomName = payload.vdoRoom;
-        if (payload.jitsiRoomName) currentVDORoomName = payload.jitsiRoomName;
-        console.log('[ELT Live] Modo de video transmitido por Host:', targetMode, 'VDO Room:', currentVDORoomName, '(Admitido:', isAdmittedToClass, ')');
+        console.log('[ELT Live] Modo de video transmitido por Host:', targetMode, '(Admitido:', isAdmittedToClass, ')');
         // NO ingresar al aula; solo actualizar el motor si el estudiante ya está formalmente dentro
         if (isAdmittedToClass) {
           await startStudentVideoEngine(targetMode);
@@ -6862,19 +6751,7 @@
         avatarEl.textContent = stuName.trim().charAt(0).toUpperCase() || 'A';
       }
     }
-
-    window.toggleJitsiExpandedSize = function() {
-      const strip = document.getElementById('webrtcVideoStrip');
-      const btn = document.getElementById('btnToggleExpandJitsi');
-      if (!strip) return;
-      const isExp = strip.classList.toggle('jitsi-expanded');
-      if (btn) {
-        btn.textContent = isExp ? '⤡' : '⤢';
-        btn.title = isExp ? 'Restaurar tamaño compacto (185x110)' : 'Expandir tamaño (340x240)';
-      }
-    };
-
-    window.setVideoStripMinimized = function(minimized) {
+window.setVideoStripMinimized = function(minimized) {
       isVideoStripMinimized = Boolean(minimized);
       const expandedBody = document.getElementById('webrtcStripExpandedBody');
       const minimizedPill = document.getElementById('webrtcStripMinimizedPill');
@@ -6969,7 +6846,7 @@
 
       strip.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
-        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip, #btnToggleExpandJitsi')) return;
+        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip')) return;
 
         const cRect = container.getBoundingClientRect();
         const sRect = strip.getBoundingClientRect();
@@ -7018,7 +6895,7 @@
       let touchCanDrag = false;
 
       strip.addEventListener('touchstart', (e) => {
-        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip, #btnToggleExpandJitsi')) return;
+        if (e.target.closest('button, #webrtcLocalControls, #btnMinimizeVideoStrip, #btnRestoreVideoStrip')) return;
         if (e.touches.length === 1) {
           const t = e.touches[0];
           touchStartX = t.clientX;
