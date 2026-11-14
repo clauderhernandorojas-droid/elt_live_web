@@ -4994,10 +4994,11 @@
       containerEl.innerHTML = '';
 
       const safeName = displayName || myName || 'Alumno';
-      const pushParam = `Stu_${encodeURIComponent(safeName)}_${Math.floor(Math.random() * 999)}`;
+      const rand = Math.floor(Math.random() * 999);
+      const pushParam = `Stu_${encodeURIComponent(safeName)}_${rand}`;
       const labelParam = encodeURIComponent(safeName);
 
-      const iframeUrl = `https://vdo.ninja/?room=${encodeURIComponent(vdoRoom)}&push=${pushParam}&label=${labelParam}&cleanoutput&autostart&noheader&novideo`;
+      const iframeUrl = `https://vdo.ninja/?room=${encodeURIComponent(vdoRoom)}&push=${pushParam}&label=${labelParam}&webcam&mic&quality=2&autostart&noheader&transparent`;
 
       const iframe = document.createElement('iframe');
       iframe.src = iframeUrl;
@@ -5006,6 +5007,11 @@
       iframe.style.border = '0';
       iframe.setAttribute('allow', 'camera; microphone; fullscreen; display-capture; autoplay');
       containerEl.appendChild(iframe);
+
+      // Al montar con &webcam&mic, sincronizar estado activo en la barra inferior
+      webrtcAudioEnabled = true;
+      webrtcVideoEnabled = true;
+
       return iframe;
     }
 
@@ -5991,9 +5997,13 @@
           webrtcAudioEnabled = !webrtcAudioEnabled;
           showMediaAlert('No se pudo acceder al micrófono: ' + (err.message || err.name || err));
         }
-      } else if (currentVideoMode === 'jitsi' || currentVideoMode === 'p2p') {
-        if (jitsiApiInstance) {
-          try { jitsiApiInstance.executeCommand('toggleAudio'); } catch (e) {}
+      } else if (currentVideoMode === 'vdo' || currentVideoMode === 'jitsi' || currentVideoMode === 'p2p') {
+        const jContainer = document.getElementById('jitsiDockContainer');
+        const vdoIframe = jContainer ? jContainer.querySelector('iframe') : null;
+        if (vdoIframe && vdoIframe.contentWindow) {
+          try {
+            vdoIframe.contentWindow.postMessage({ mic: webrtcAudioEnabled }, '*');
+          } catch (e) {}
         }
       }
       updateLocalMediaUI();
@@ -6021,9 +6031,13 @@
             webrtcVideoEnabled = !webrtcVideoEnabled;
             showMediaAlert('No se pudo encender la cámara frontal: ' + (err.message || err.name || err));
           }
-        } else if (currentVideoMode === 'jitsi' || currentVideoMode === 'p2p') {
-          if (jitsiApiInstance) {
-            try { jitsiApiInstance.executeCommand('toggleVideo'); } catch (e) {}
+        } else if (currentVideoMode === 'vdo' || currentVideoMode === 'jitsi' || currentVideoMode === 'p2p') {
+          const jContainer = document.getElementById('jitsiDockContainer');
+          const vdoIframe = jContainer ? jContainer.querySelector('iframe') : null;
+          if (vdoIframe && vdoIframe.contentWindow) {
+            try {
+              vdoIframe.contentWindow.postMessage({ camera: webrtcVideoEnabled }, '*');
+            } catch (e) {}
           }
         }
       } catch (fatalCamErr) {
