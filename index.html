@@ -65,10 +65,22 @@
       align-items: stretch !important;
       justify-items: stretch !important;
       overflow: hidden !important;
-      /* Por defecto en PC para 1 o 2 participantes: lado a lado al 50%/50% */
+      /* Cuadrícula por defecto para 2 participantes */
       grid-template-columns: repeat(2, 1fr) !important;
       grid-template-rows: 1fr !important;
     }
+    /* #webrtcRemoteCards se desenvuelve como contents para que cada tarjeta remota y la local participen como celdas hermanas en el grid */
+    #webrtcVideoStrip.gallery-mode #webrtcRemoteCards {
+      display: contents !important;
+    }
+    #webrtcVideoStrip.gallery-mode #webrtcRemoteCards:empty {
+      display: none !important;
+    }
+    #webrtcVideoStrip.gallery-mode #webrtcLocalCard {
+      order: 99 !important;
+      margin: 0 !important;
+    }
+    /* Cuadrículas responsivas según número de participantes en PC */
     #webrtcVideoStrip.gallery-mode.gallery-count-1 #webrtcStripExpandedBody {
       grid-template-columns: 1fr !important;
       grid-template-rows: 1fr !important;
@@ -77,31 +89,17 @@
       grid-template-columns: repeat(2, 1fr) !important;
       grid-template-rows: 1fr !important;
     }
-    #webrtcVideoStrip.gallery-mode.gallery-count-3 #webrtcStripExpandedBody,
-    #webrtcVideoStrip.gallery-mode.gallery-count-4 #webrtcStripExpandedBody,
-    #webrtcVideoStrip.gallery-mode.gallery-count-many #webrtcStripExpandedBody {
+    #webrtcVideoStrip.gallery-mode.gallery-count-3 #webrtcStripExpandedBody {
+      grid-template-columns: repeat(3, 1fr) !important;
+      grid-template-rows: 1fr !important;
+    }
+    #webrtcVideoStrip.gallery-mode.gallery-count-4 #webrtcStripExpandedBody {
       grid-template-columns: repeat(2, 1fr) !important;
       grid-template-rows: repeat(2, 1fr) !important;
     }
-    #webrtcVideoStrip.gallery-mode #webrtcRemoteCards {
-      display: flex !important;
-      width: 100% !important;
-      height: 100% !important;
-      min-width: 0 !important;
-      min-height: 0 !important;
-      gap: 1.5rem !important;
-      align-items: stretch !important;
-      justify-content: stretch !important;
-      order: 1 !important;
-      margin: 0 !important;
-      padding: 0 !important;
-    }
-    #webrtcVideoStrip.gallery-mode #webrtcRemoteCards:empty {
-      display: none !important;
-    }
-    #webrtcVideoStrip.gallery-mode #webrtcLocalCard {
-      order: 2 !important;
-      margin: 0 !important;
+    #webrtcVideoStrip.gallery-mode.gallery-count-many #webrtcStripExpandedBody {
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)) !important;
+      grid-template-rows: repeat(auto-fit, minmax(200px, 1fr)) !important;
     }
     /* Tarjetas individuales dentro de la galería */
     #webrtcVideoStrip.gallery-mode #webrtcLocalCard,
@@ -121,20 +119,42 @@
       box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4) !important;
       background-color: #111317 !important;
       aspect-ratio: auto !important;
-      flex: 1 1 0% !important;
     }
-    /* Contenedores internos de video y placeholder/avatar estirados al 100% */
-    #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder,
-    #webrtcVideoStrip.gallery-mode [data-role="placeholder"] {
+    /* Contenedores de video al 100% absoluto para evitar franjas laterales */
+    #webrtcVideoStrip.gallery-mode video {
+      position: absolute !important;
+      inset: 0 !important;
       width: 100% !important;
       height: 100% !important;
       min-width: 0 !important;
       min-height: 0 !important;
+      object-fit: cover !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+    }
+    #webrtcVideoStrip.gallery-mode #webrtcLocalVideo {
+      transform: scaleX(-1) !important;
+      transform-origin: center center !important;
+    }
+    #webrtcVideoStrip.gallery-mode video:not(.hidden) {
+      display: block !important;
+    }
+    #webrtcVideoStrip.gallery-mode video.hidden {
+      display: none !important;
+    }
+    /* Placeholders con avatares centrados */
+    #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder,
+    #webrtcVideoStrip.gallery-mode [data-role="placeholder"] {
+      position: absolute !important;
+      inset: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
       display: flex !important;
       flex-direction: column !important;
       align-items: center !important;
       justify-content: center !important;
-      flex: 1 1 0% !important;
+      background-color: #111317 !important;
     }
     #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder:not(.hidden),
     #webrtcVideoStrip.gallery-mode [data-role="placeholder"]:not(.hidden) {
@@ -144,39 +164,36 @@
     #webrtcVideoStrip.gallery-mode [data-role="placeholder"].hidden {
       display: none !important;
     }
-    #webrtcVideoStrip.gallery-mode video {
-      width: 100% !important;
-      height: 100% !important;
-      min-width: 0 !important;
-      min-height: 0 !important;
-      object-fit: cover !important;
-      flex: 1 1 0% !important;
-    }
-    #webrtcVideoStrip.gallery-mode video:not(.hidden) {
-      display: block !important;
-    }
-    #webrtcVideoStrip.gallery-mode video.hidden {
-      display: none !important;
-    }
-    /* Círculo de avatar grande y centrado */
     #webrtcVideoStrip.gallery-mode #webrtcLocalAvatarInitial,
     #webrtcVideoStrip.gallery-mode [data-role="placeholder"] .rounded-full {
       width: 90px !important;
       height: 90px !important;
       font-size: 36px !important;
-      border-width: 3px !important;
+      margin-bottom: 0.5rem !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
     }
     #webrtcVideoStrip.gallery-mode #webrtcLocalNameTag,
     #webrtcVideoStrip.gallery-mode [data-role="name"] {
+      position: absolute !important;
+      bottom: 0.75rem !important;
+      left: 0.75rem !important;
       font-size: 13px !important;
-      padding: 4px 10px !important;
+      padding: 0.25rem 0.6rem !important;
+      background-color: rgba(0, 0, 0, 0.75) !important;
       border-radius: 6px !important;
-      bottom: 12px !important;
-      left: 12px !important;
-      z-index: 20 !important;
+      z-index: 10 !important;
+    }
+    #webrtcVideoStrip.gallery-mode #webrtcLocalMuteIcon,
+    #webrtcVideoStrip.gallery-mode [data-role="mute"] {
+      position: absolute !important;
+      top: 0.75rem !important;
+      right: 0.75rem !important;
+      width: 28px !important;
+      height: 28px !important;
+      font-size: 13px !important;
+      z-index: 10 !important;
     }
     #wbViewport, #wbCanvas {
       touch-action: none;
@@ -202,18 +219,12 @@
       #webrtcVideoStrip {
         max-width: 95% !important;
       }
-      /* Modo Galería Zoom en pantallas móviles (max-width: 768px): tarjetas al 100% de ancho repartiendo el alto completo */
+      /* Modo Galería Zoom en pantallas móviles (max-width: 768px): tarjetas ocupando el alto responsivo */
       #webrtcVideoStrip.gallery-mode {
         padding: 0.75rem !important;
         gap: 0.75rem !important;
       }
       #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody {
-        gap: 0.75rem !important;
-        grid-template-columns: 1fr !important;
-        grid-template-rows: repeat(2, 1fr) !important;
-      }
-      #webrtcVideoStrip.gallery-mode #webrtcRemoteCards {
-        flex-direction: column !important;
         gap: 0.75rem !important;
       }
       /* 1 participante en móvil: 100% ancho y alto */
@@ -226,18 +237,25 @@
         grid-template-columns: 1fr !important;
         grid-template-rows: repeat(2, 1fr) !important;
       }
-      /* 3 o 4 participantes en móvil: cuadrícula 2x2 */
-      #webrtcVideoStrip.gallery-mode.gallery-count-3 #webrtcStripExpandedBody,
-      #webrtcVideoStrip.gallery-mode.gallery-count-4 #webrtcStripExpandedBody,
-      #webrtcVideoStrip.gallery-mode.gallery-count-many #webrtcStripExpandedBody {
+      /* 3 participantes en móvil vertical: 3 tarjetas apiladas al 33.3% alto cada una */
+      #webrtcVideoStrip.gallery-mode.gallery-count-3 #webrtcStripExpandedBody {
+        grid-template-columns: 1fr !important;
+        grid-template-rows: repeat(3, 1fr) !important;
+      }
+      /* 4 participantes en móvil: cuadrícula 2x2 */
+      #webrtcVideoStrip.gallery-mode.gallery-count-4 #webrtcStripExpandedBody {
         grid-template-columns: repeat(2, 1fr) !important;
         grid-template-rows: repeat(2, 1fr) !important;
       }
+      #webrtcVideoStrip.gallery-mode.gallery-count-many #webrtcStripExpandedBody {
+        grid-template-columns: repeat(2, 1fr) !important;
+        grid-template-rows: repeat(auto-fit, minmax(160px, 1fr)) !important;
+      }
       #webrtcVideoStrip.gallery-mode #webrtcLocalAvatarInitial,
       #webrtcVideoStrip.gallery-mode [data-role="placeholder"] .rounded-full {
-        width: 80px !important;
-        height: 80px !important;
-        font-size: 32px !important;
+        width: 72px !important;
+        height: 72px !important;
+        font-size: 28px !important;
       }
     }
     /* Controles táctiles permanentes en móviles y dispositivos sin hover */
@@ -531,7 +549,7 @@
             </div>
             <!-- Miniatura Local (Estudiante) -->
             <div id="webrtcLocalCard" class="relative w-36 h-20 rounded-xl overflow-hidden bg-[#111317] border border-white/10 flex-shrink-0 flex items-center justify-center group">
-              <video id="webrtcLocalVideo" autoplay playsinline webkit-playsinline muted class="w-full h-full object-cover transform scale-x-[-1] hidden"></video>
+              <video id="webrtcLocalVideo" autoplay playsinline webkit-playsinline muted class="absolute inset-0 w-full h-full object-cover transform scale-x-[-1] hidden"></video>
               <div id="webrtcLocalPlaceholder" class="flex flex-col items-center justify-center text-slate-400">
                 <div id="webrtcLocalAvatarInitial" class="w-8 h-8 rounded-full bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-xs font-bold text-indigo-200 mb-0.5">A</div>
               </div>
@@ -5776,7 +5794,7 @@
 
         const currentTrack = isSharingScreen && screenStream
           ? screenStream.getVideoTracks()[0]
-          : (webrtcVideoEnabled && p2pLocalStream ? p2pLocalStream.getVideoTracks()[0] : null);
+          : (webrtcVideoEnabled && p2pLocalStream ? p2pLocalStream.getVideoTracks().find(t => t.readyState === 'live') || null : null);
 
         if (peerObj.videoSender) {
           try { await peerObj.videoSender.replaceTrack(currentTrack || null); } catch (e) {}
@@ -5786,7 +5804,7 @@
           } catch (e) {}
         }
 
-        const micTrack = (webrtcAudioEnabled && p2pLocalStream) ? p2pLocalStream.getAudioTracks()[0] : null;
+        const micTrack = (webrtcAudioEnabled && p2pLocalStream) ? p2pLocalStream.getAudioTracks().find(t => t.readyState === 'live') || null : null;
         if (peerObj.audioSender) {
           try { await peerObj.audioSender.replaceTrack(micTrack || null); } catch (e) {}
         } else if (micTrack) {
@@ -5794,6 +5812,13 @@
             peerObj.audioSender = peerObj.pc.addTrack(micTrack, p2pLocalStream);
           } catch (e) {}
         }
+
+        // Asegurar transceivers en sendrecv
+        try {
+          peerObj.pc.getTransceivers().forEach(tr => {
+            if (tr.direction !== 'sendrecv') tr.direction = 'sendrecv';
+          });
+        } catch (e) {}
 
         // Disparar renegociación SDP hacia el par remoto para que reciba la pista de inmediato
         await createAndSendP2POffer(remotePeerId, peerObj.name, peerObj.role);
@@ -5986,17 +6011,43 @@
           vidEl.srcObject = peerObj.stream;
           vidEl.muted = false;
         }
-        const hasStreamLiveVideoTrack = peerObj.stream && peerObj.stream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled);
+
+        if (!vidEl.__frameDetectionAttached) {
+          vidEl.__frameDetectionAttached = true;
+          const onFrameReady = () => {
+            if (peerObj.videoEnabled && !peerObj.isSharingScreen && vidEl.videoWidth > 0 && !vidEl.paused) {
+              vidEl.classList.remove('hidden');
+              if (phEl) {
+                phEl.classList.add('hidden');
+                phEl.style.display = 'none';
+              }
+            }
+          };
+          vidEl.addEventListener('loadedmetadata', onFrameReady);
+          vidEl.addEventListener('playing', onFrameReady);
+          vidEl.addEventListener('timeupdate', onFrameReady);
+          vidEl.addEventListener('pause', () => {
+            if (vidEl.paused && phEl) {
+              vidEl.classList.add('hidden');
+              phEl.classList.remove('hidden');
+              phEl.style.display = 'flex';
+            }
+          });
+        }
+
+        const hasStreamLiveVideoTrack = peerObj.stream && peerObj.stream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled && !t.muted);
         if (hasStreamLiveVideoTrack) {
           peerObj.videoEnabled = true;
         }
-        const hasLiveVideo = (Boolean(peerObj.videoEnabled) || hasStreamLiveVideoTrack) && !peerObj.isSharingScreen;
-        vidEl.classList.toggle('hidden', !hasLiveVideo);
+        const hasLiveDecodedFrames = vidEl.videoWidth > 0 && !vidEl.paused && vidEl.readyState >= 2;
+        const shouldShowVideo = Boolean(peerObj.videoEnabled) && hasStreamLiveVideoTrack && hasLiveDecodedFrames && !peerObj.isSharingScreen;
+
+        vidEl.classList.toggle('hidden', !shouldShowVideo);
         if (phEl) {
-          phEl.classList.toggle('hidden', hasLiveVideo);
-          phEl.style.display = hasLiveVideo ? 'none' : 'flex';
+          phEl.classList.toggle('hidden', shouldShowVideo);
+          phEl.style.display = shouldShowVideo ? 'none' : 'flex';
         }
-        if (hasLiveVideo) {
+        if (peerObj.videoEnabled && hasStreamLiveVideoTrack) {
           vidEl.play().catch(() => {});
         }
       }
@@ -6224,7 +6275,7 @@
             showMediaAlert('No se pudo encender la cámara frontal: ' + (err.message || err.name || err));
           }
         } else if (currentVideoMode === 'p2p') {
-          if (!p2pLocalStream) {
+          if (!p2pLocalStream || (webrtcVideoEnabled && (!p2pLocalStream.getVideoTracks().length || !p2pLocalStream.getVideoTracks().some(t => t.readyState === 'live')))) {
             await ensureP2PLocalStream(webrtcAudioEnabled, webrtcVideoEnabled);
           }
           if (p2pLocalStream) {
@@ -6397,6 +6448,9 @@
       if (typeof updateMinimizedVideoStripSummary === 'function') {
         updateMinimizedVideoStripSummary();
       }
+      if (typeof syncVideoGalleryMode === 'function') {
+        syncVideoGalleryMode();
+      }
     }
 
     function cleanupOrphanStudentVideoCards(activeParticipantKeys) {
@@ -6527,6 +6581,7 @@
           micIconEl: micIconEl || webrtcPeers[remotePeerId].micIconEl
         });
         updateMinimizedVideoStripSummary();
+        if (typeof syncVideoGalleryMode === 'function') syncVideoGalleryMode();
         return webrtcPeers[remotePeerId];
       }
 
