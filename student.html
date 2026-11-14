@@ -411,7 +411,7 @@
             <!-- Contenedor Dinámico para Miniaturas Remotas (Profesor y compañeros) -->
             <div id="webrtcRemoteCards" class="flex items-center gap-2"></div>
             <!-- Botones Expandir y Minimizar Cámaras -->
-            <button id="btnToggleExpandJitsi" type="button" onclick="event.stopPropagation(); toggleJitsiExpandedSize()" class="self-start -mt-0.5 ml-0.5 w-6 h-6 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center text-xs font-bold transition shrink-0 cursor-pointer" title="Expandir / Reducir tamaño de Jitsi">
+            <button id="btnToggleExpandJitsi" type="button" onclick="event.stopPropagation(); toggleJitsiExpandedSize()" class="self-start -mt-0.5 ml-0.5 w-6 h-6 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center text-xs font-bold transition shrink-0 cursor-pointer" title="Expandir / Reducir tamaño de video">
               ⤢
             </button>
             <button id="btnMinimizeVideoStrip" type="button" onclick="event.stopPropagation(); setVideoStripMinimized(true)" class="self-start -mt-0.5 ml-0.5 w-6 h-6 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center text-xs font-bold transition shrink-0 cursor-pointer" title="Minimizar recuadro de cámaras">
@@ -2036,9 +2036,9 @@
           if (!u) return;
 
           if (key === 'host' || u.role === 'host') {
-            if (u.jitsiRoomName) currentJitsiRoomName = u.jitsiRoomName;
-            if (u.jitsiDomain) currentJitsiDomain = u.jitsiDomain;
-            const hMode = (u.videoMode === 'livekit' || u.videoEngine === 'livekit') ? 'livekit' : 'jitsi';
+            if (u.vdoRoom) currentVDORoomName = u.vdoRoom;
+            if (u.jitsiRoomName) currentVDORoomName = u.jitsiRoomName;
+            const hMode = (u.videoMode === 'livekit' || u.videoEngine === 'livekit') ? 'livekit' : 'vdo';
             if (hMode !== currentVideoMode && isAdmittedToClass) {
               if (typeof startStudentVideoEngine === 'function') {
                 startStudentVideoEngine(hMode);
@@ -2125,14 +2125,14 @@
         const targetName = (payload.studentName || '').trim().toLowerCase();
         const currentName = (myName || '').trim().toLowerCase();
 
-        if (payload.jitsiRoomName) currentJitsiRoomName = payload.jitsiRoomName;
-        if (payload.jitsiDomain) currentJitsiDomain = payload.jitsiDomain;
+        if (payload.vdoRoom) currentVDORoomName = payload.vdoRoom;
+        if (payload.jitsiRoomName) currentVDORoomName = payload.jitsiRoomName;
 
         if (!isAdmittedToClass) {
           // Admitir solo si coincide con el studentId o studentName de este alumno
           if ((targetId && targetId === myStudentId) || (targetName && targetName === currentName)) {
             if (payload.videoMode || payload.videoEngine) {
-              assignedVideoMode = (payload.videoMode === 'livekit' || payload.videoEngine === 'livekit') ? 'livekit' : 'jitsi';
+              assignedVideoMode = (payload.videoMode === 'livekit' || payload.videoEngine === 'livekit') ? 'livekit' : 'vdo';
             }
             playGentleNotificationBeep();
             admitStudentToClass();
@@ -4981,92 +4981,32 @@
       iceCandidatePoolSize: 10
     };
 
-    // Estados de Conexión LiveKit Cloud SFU y Jitsi SFU
+    // Estados de Conexión LiveKit Cloud SFU y VDO.Ninja SFU
     let livekitRoom = null;
     let livekitUrl = null;
     let livekitToken = null;
     let isConnectingLiveKit = false;
 
-    let currentJitsiRoomName = null;
-    let currentJitsiDomain = 'meet.jit.si';
-    let jitsiScriptLoaded = false;
-    let jitsiApiInstance = null;
+    let currentVDORoomName = null;
 
-    async function loadJitsiScript() {
-      if (window.JitsiMeetExternalAPI) return true;
-      if (jitsiScriptLoaded) return true;
-
-      return new Promise((resolve) => {
-        const s = document.createElement('script');
-        s.src = 'https://meet.jit.si/external_api.js';
-        s.async = true;
-        s.onload = () => { jitsiScriptLoaded = true; resolve(true); };
-        s.onerror = (e) => {
-          console.error('[Jitsi] Error cargando external_api.js desde meet.jit.si:', e);
-          resolve(false);
-        };
-        document.head.appendChild(s);
-      });
-    }
-
-    async function mountJitsiMeet(containerEl, roomName, displayName, domain = currentJitsiDomain) {
-      if (!containerEl || !roomName) return null;
-      if (jitsiApiInstance) {
-        try { jitsiApiInstance.dispose(); } catch (e) {}
-        jitsiApiInstance = null;
-      }
-
+    function mountVDONinjaStudent(containerEl, vdoRoom, displayName) {
+      if (!containerEl || !vdoRoom) return null;
       containerEl.innerHTML = '';
-      const scriptOk = await loadJitsiScript();
 
-      if (scriptOk && window.JitsiMeetExternalAPI) {
-        try {
-          const options = {
-            roomName: roomName,
-            width: '100%',
-            height: '100%',
-            parentNode: containerEl,
-            userInfo: {
-              displayName: displayName || 'Alumno'
-            },
-            configOverwrite: {
-              disableDeepLinking: true,
-              prejoinPageEnabled: false,
-              startWithAudioMuted: true,
-              startWithVideoMuted: true,
-              toolbarButtons: ['microphone', 'camera'],
-              resolution: 360,
-              constraints: {
-                video: {
-                  height: { ideal: 360, max: 360 }
-                }
-              }
-            },
-            interfaceConfigOverwrite: {
-              SHOW_JITSI_WATERMARK: false,
-              SHOW_WATERMARK_FOR_GUESTS: false,
-              MOBILE_APP_PROMO: false,
-              TOOLBAR_BUTTONS: ['microphone', 'camera']
-            }
-          };
+      const safeName = displayName || myName || 'Alumno';
+      const pushParam = `Stu_${encodeURIComponent(safeName)}_${Math.floor(Math.random() * 999)}`;
+      const labelParam = encodeURIComponent(safeName);
 
-          jitsiApiInstance = new window.JitsiMeetExternalAPI(domain, options);
-          return jitsiApiInstance;
-        } catch (apiErr) {
-          console.warn('[Jitsi] Error al instanciar JitsiMeetExternalAPI en Estudiante:', apiErr);
-        }
-      }
+      const iframeUrl = `https://vdo.ninja/?room=${encodeURIComponent(vdoRoom)}&push=${pushParam}&label=${labelParam}&cleanoutput&autostart&noheader&novideo`;
 
-      // Fallback a iframe directo si la API JS fue bloqueada
-      const iframeUrl = `https://${domain}/${encodeURIComponent(roomName)}#config.prejoinPageEnabled=false&config.startWithAudioMuted=true&config.startWithVideoMuted=true&userInfo.displayName=${encodeURIComponent(displayName || 'Alumno')}`;
       const iframe = document.createElement('iframe');
       iframe.src = iframeUrl;
       iframe.style.width = '100%';
       iframe.style.height = '100%';
-      iframe.style.border = 'none';
+      iframe.style.border = '0';
       iframe.setAttribute('allow', 'camera; microphone; fullscreen; display-capture; autoplay');
       containerEl.appendChild(iframe);
-      return null;
+      return iframe;
     }
 
     // Estados de Conexión WebRTC P2P Directo
@@ -5982,11 +5922,11 @@
 
     // ==================== INICIALIZADOR Y CONTROLES UNIFICADOS (P2P / LIVEKIT) ====================
     async function startStudentVideoEngine(mode) {
-      const targetMode = (mode === 'livekit') ? 'livekit' : 'jitsi';
+      const targetMode = (mode === 'livekit') ? 'livekit' : 'vdo';
       assignedVideoMode = targetMode;
       currentVideoMode = targetMode;
 
-      // PROHIBIDO iniciar motor de video o conectar Jitsi mientras el estudiante esté en Sala de Espera
+      // PROHIBIDO iniciar motor de video o conectar VDO.Ninja mientras el estudiante esté en Sala de Espera
       if (!isAdmittedToClass) {
         console.log('[ELT Live] Modo de video configurado a', targetMode, '— retenido en Sala de Espera hasta aprobación del profesor.');
         return;
@@ -5999,10 +5939,6 @@
       const remoteCards = document.getElementById('webrtcRemoteCards');
 
       if (targetMode === 'livekit') {
-        if (jitsiApiInstance) {
-          try { jitsiApiInstance.dispose(); } catch (e) {}
-          jitsiApiInstance = null;
-        }
         if (jitsiContainer) {
           jitsiContainer.classList.add('hidden');
           jitsiContainer.innerHTML = '';
@@ -6020,7 +5956,7 @@
           await connectLiveKit(currentRoomPin, myName || 'Alumno', false);
         }
       } else {
-        // Modo Gratis Jitsi SFU (meet.jit.si)
+        // Modo Gratis VDO.Ninja SFU
         if (livekitRoom) {
           try { await livekitRoom.disconnect(); } catch (e) {}
           livekitRoom = null;
@@ -6038,8 +5974,8 @@
 
         if (jitsiContainer) {
           jitsiContainer.classList.remove('hidden');
-          const jRoom = currentJitsiRoomName || ('ELTLive_' + (currentRoomPin || '0000') + '_session');
-          await mountJitsiMeet(jitsiContainer, jRoom, myName || 'Alumno', currentJitsiDomain || 'meet.jit.si');
+          const vRoom = currentVDORoomName || ('ELTLive' + (currentRoomPin || '0000') + 'room');
+          mountVDONinjaStudent(jitsiContainer, vRoom, myName || 'Alumno');
         }
       }
       updateLocalMediaUI();
@@ -6303,7 +6239,7 @@
       const strip = document.getElementById('webrtcVideoStrip');
       const remoteContainer = document.getElementById('webrtcRemoteCards') || strip;
       if (!strip || !remoteContainer || !remotePeerId) return null;
-      if (currentVideoMode === 'jitsi') return null;
+      if (currentVideoMode === 'vdo' || currentVideoMode === 'jitsi') return null;
 
       const resolvedRole = role || ((name && name.includes('Profesor')) || String(remotePeerId).startsWith('host_') ? 'host' : 'student');
       const resolvedName = (name || (resolvedRole === 'host' ? 'Profesor (Host)' : 'Participante')).trim();
@@ -6577,12 +6513,12 @@
 
       channel.on('broadcast', { event: 'VIDEO_MODE_CONFIG' }, async ({ payload }) => {
         if (!payload) return;
-        const targetMode = (payload.videoMode === 'livekit' || payload.videoEngine === 'livekit') ? 'livekit' : 'jitsi';
+        const targetMode = (payload.videoMode === 'livekit' || payload.videoEngine === 'livekit') ? 'livekit' : 'vdo';
         assignedVideoMode = targetMode;
         currentVideoMode = targetMode;
-        if (payload.jitsiRoomName) currentJitsiRoomName = payload.jitsiRoomName;
-        if (payload.jitsiDomain) currentJitsiDomain = payload.jitsiDomain;
-        console.log('[ELT Live] Modo de video transmitido por Host:', targetMode, 'Jitsi Room:', currentJitsiRoomName, '(Admitido:', isAdmittedToClass, ')');
+        if (payload.vdoRoom) currentVDORoomName = payload.vdoRoom;
+        if (payload.jitsiRoomName) currentVDORoomName = payload.jitsiRoomName;
+        console.log('[ELT Live] Modo de video transmitido por Host:', targetMode, 'VDO Room:', currentVDORoomName, '(Admitido:', isAdmittedToClass, ')');
         // NO ingresar al aula; solo actualizar el motor si el estudiante ya está formalmente dentro
         if (isAdmittedToClass) {
           await startStudentVideoEngine(targetMode);
