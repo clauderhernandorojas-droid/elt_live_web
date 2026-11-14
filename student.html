@@ -5401,8 +5401,13 @@
             }
           } else if (wantAudio) {
             try {
-              stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            } catch (errA) {}
+              stream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                video: false
+              });
+            } catch (errA) {
+              try { stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); } catch (errA2) {}
+            }
           }
 
           if (stream) {
@@ -5413,12 +5418,26 @@
             originalMicTrack = p2pLocalStream.getAudioTracks()[0] || null;
           }
         } else {
-          // Si ya existe p2pLocalStream pero falta audio
-          if (wantAudio && p2pLocalStream.getAudioTracks().length === 0) {
+          // Si ya existe p2pLocalStream pero falta audio o está finalizada
+          const existingAudioTracks = p2pLocalStream.getAudioTracks();
+          const hasLiveAudio = existingAudioTracks.length > 0 && existingAudioTracks.some(t => t.readyState === 'live');
+          if (wantAudio && !hasLiveAudio) {
             try {
-              const aStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-              aStream.getAudioTracks().forEach(t => p2pLocalStream.addTrack(t));
-              originalMicTrack = p2pLocalStream.getAudioTracks()[0] || null;
+              let aStream = null;
+              try {
+                aStream = await navigator.mediaDevices.getUserMedia({
+                  audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                });
+              } catch (ae1) {
+                aStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              }
+              if (aStream) {
+                aStream.getAudioTracks().forEach(t => {
+                  t.enabled = true;
+                  p2pLocalStream.addTrack(t);
+                });
+                originalMicTrack = p2pLocalStream.getAudioTracks()[0] || null;
+              }
             } catch (aErr) {
               console.warn('[P2P] No se pudo agregar pista de audio:', aErr);
             }
@@ -5746,9 +5765,15 @@
           p2pAudioEl.id = `webrtc_audio_${remotePeerId}`;
           p2pAudioEl.setAttribute('data-p2p-peer', remotePeerId);
           p2pAudioEl.autoplay = true;
+          p2pAudioEl.playsInline = true;
           p2pAudioEl.setAttribute('playsinline', '');
+          p2pAudioEl.setAttribute('webkit-playsinline', '');
+          p2pAudioEl.muted = false;
+          p2pAudioEl.volume = 1.0;
           document.body.appendChild(p2pAudioEl);
         }
+        p2pAudioEl.muted = false;
+        p2pAudioEl.volume = 1.0;
         if (p2pAudioEl.srcObject !== peerObj.stream) {
           p2pAudioEl.srcObject = peerObj.stream;
         }
@@ -5889,16 +5914,46 @@
           showMediaAlert('No se pudo acceder al micrófono: ' + (err.message || err.name || err));
         }
       } else if (currentVideoMode === 'p2p') {
-        if (!p2pLocalStream) {
-          await ensureP2PLocalStream(webrtcAudioEnabled, webrtcVideoEnabled);
+        try {
+          // Si el estudiante enciende su micrófono, asegurar que exista pista de audio activa
+          if (webrtcAudioEnabled) {
+            const hasLiveAudio = p2pLocalStream && p2pLocalStream.getAudioTracks().some(t => t.readyState === 'live');
+            if (!p2pLocalStream || !hasLiveAudio) {
+              try {
+                let micStream = null;
+                try {
+                  micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                  });
+                } catch (mErr1) {
+                  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                }
+                if (micStream) {
+                  if (!p2pLocalStream) {
+                    p2pLocalStream = micStream;
+                  } else {
+                    micStream.getAudioTracks().forEach(t => p2pLocalStream.addTrack(t));
+                  }
+                  originalMicTrack = p2pLocalStream.getAudioTracks()[0] || null;
+                }
+              } catch (micFetchErr) {
+                console.error('[P2P] Permiso de micrófono denegado en celular:', micFetchErr);
+                webrtcAudioEnabled = false;
+                showMediaAlert('No se pudo activar el micrófono. Concede permiso en el navegador de tu celular.');
+              }
+            }
+          }
+          if (p2pLocalStream) {
+            p2pLocalStream.getAudioTracks().forEach(t => { t.enabled = webrtcAudioEnabled; });
+          }
+          await syncP2PTracksToAllPeers();
+        } catch (errAudio) {
+          console.error('[P2P] Error en toggleLocalAudio:', errAudio);
         }
-        if (p2pLocalStream) {
-          p2pLocalStream.getAudioTracks().forEach(t => { t.enabled = webrtcAudioEnabled; });
-        }
-        await syncP2PTracksToAllPeers();
       }
       updateLocalMediaUI();
       broadcastWebRTCMediaState();
+      unlockAllP2PRemoteAudio();
     }
 
     async function toggleLocalVideo() {
@@ -6268,6 +6323,28 @@
       updateMinimizedVideoStripSummary();
       return webrtcPeers[remotePeerId];
     }
+
+    
+    // Desbloqueo forzado de audio remoto WebRTC en dispositivos móviles (Chrome / Safari / Firefox Android)
+    function unlockAllP2PRemoteAudio() {
+      try {
+        const audioEls = document.querySelectorAll('audio[data-p2p-peer], audio[data-livekit-participant]');
+        audioEls.forEach(el => {
+          el.muted = false;
+          el.volume = 1.0;
+          el.play().catch(() => {});
+        });
+        const remoteVideos = document.querySelectorAll('#webrtcRemoteCards video, #webrtcVideoStrip video:not(#webrtcLocalVideo)');
+        remoteVideos.forEach(v => {
+          v.muted = false;
+          v.volume = 1.0;
+          v.play().catch(() => {});
+        });
+      } catch (e) {}
+    }
+    ['touchstart', 'touchend', 'click', 'keydown'].forEach(evt => {
+      document.addEventListener(evt, unlockAllP2PRemoteAudio, { passive: true });
+    });
 
     function syncStudentRemoteScreenShareOverlay() {
       const overlay = document.getElementById('remoteScreenShareOverlay');
