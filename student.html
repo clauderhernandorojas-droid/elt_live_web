@@ -23,15 +23,20 @@
       background-color: #020617;
       -webkit-tap-highlight-color: transparent;
     }
-    /* Estilos del Modo Galería tipo Zoom (cuando no hay lección/pizarra/screen share) */
+    /* Estilos del Modo Galería tipo Zoom Gigante (cuando no hay lección/pizarra/screen share) */
     #webrtcVideoStrip.gallery-mode {
-      position: relative !important;
-      inset: 0 !important;
+      display: grid !important;
       width: 100% !important;
       height: 100% !important;
-      flex: 1 1 0% !important;
       max-width: 100% !important;
       max-height: 100% !important;
+      min-height: 50vh !important;
+      margin: 0 !important;
+      padding: 1.5rem !important;
+      gap: 1.5rem !important;
+      box-sizing: border-box !important;
+      position: relative !important;
+      inset: 0 !important;
       top: 0 !important;
       left: 0 !important;
       right: 0 !important;
@@ -40,11 +45,8 @@
       border: 0 !important;
       border-radius: 0 !important;
       background-color: #0a0c10 !important;
-      padding: 16px !important;
       z-index: 25 !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
+      flex: 1 1 0% !important;
       box-shadow: none !important;
     }
     #webrtcVideoStrip.gallery-mode #webrtcDragHandle,
@@ -54,97 +56,127 @@
     #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody {
       width: 100% !important;
       height: 100% !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
       display: grid !important;
-      gap: 16px !important;
-      justify-content: center !important;
-      align-content: center !important;
-      justify-items: center !important;
-      align-items: center !important;
+      gap: 1.5rem !important;
+      grid-column: 1 / -1 !important;
+      grid-row: 1 / -1 !important;
+      align-items: stretch !important;
+      justify-items: stretch !important;
       overflow: hidden !important;
+      /* Por defecto en PC para 1 o 2 participantes: lado a lado al 50%/50% */
+      grid-template-columns: repeat(2, 1fr) !important;
+      grid-template-rows: 1fr !important;
+    }
+    #webrtcVideoStrip.gallery-mode.gallery-count-1 #webrtcStripExpandedBody {
+      grid-template-columns: 1fr !important;
+      grid-template-rows: 1fr !important;
+    }
+    #webrtcVideoStrip.gallery-mode.gallery-count-2 #webrtcStripExpandedBody {
+      grid-template-columns: repeat(2, 1fr) !important;
+      grid-template-rows: 1fr !important;
+    }
+    #webrtcVideoStrip.gallery-mode.gallery-count-3 #webrtcStripExpandedBody,
+    #webrtcVideoStrip.gallery-mode.gallery-count-4 #webrtcStripExpandedBody,
+    #webrtcVideoStrip.gallery-mode.gallery-count-many #webrtcStripExpandedBody {
+      grid-template-columns: repeat(2, 1fr) !important;
+      grid-template-rows: repeat(2, 1fr) !important;
     }
     #webrtcVideoStrip.gallery-mode #webrtcRemoteCards {
-      display: contents !important;
-    }
-    #webrtcVideoStrip.gallery-mode [id^="webrtcCard_"] {
+      display: flex !important;
+      width: 100% !important;
+      height: 100% !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      gap: 1.5rem !important;
+      align-items: stretch !important;
+      justify-content: stretch !important;
       order: 1 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    #webrtcVideoStrip.gallery-mode #webrtcRemoteCards:empty {
+      display: none !important;
     }
     #webrtcVideoStrip.gallery-mode #webrtcLocalCard {
       order: 2 !important;
+      margin: 0 !important;
     }
-    /* Cuadrícula Galería Zoom: 1 participante (centrado) */
-    #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-1 {
-      grid-template-columns: minmax(280px, 860px) !important;
-      grid-template-rows: minmax(180px, 82%) !important;
-    }
-    /* Cuadrícula Galería Zoom: 2 participantes (50% / 50% lado a lado) */
-    #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-2 {
-      grid-template-columns: repeat(2, minmax(220px, 1fr)) !important;
-      grid-template-rows: minmax(180px, 82%) !important;
-    }
-    @media (max-width: 640px) {
-      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-2 {
-        grid-template-columns: 1fr !important;
-        grid-template-rows: repeat(2, minmax(160px, 1fr)) !important;
-      }
-    }
-    /* Cuadrícula Galería Zoom: 3 o 4 participantes (2x2) */
-    #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-3,
-    #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-4 {
-      grid-template-columns: repeat(2, minmax(200px, 1fr)) !important;
-      grid-template-rows: repeat(2, minmax(140px, 1fr)) !important;
-    }
-    /* Cuadrícula Galería Zoom: 5 o más participantes (3x2 / 3x3) */
-    #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-many {
-      grid-template-columns: repeat(3, minmax(160px, 1fr)) !important;
-      grid-template-rows: repeat(auto-fit, minmax(120px, 1fr)) !important;
-    }
-    /* Tarjetas en Modo Galería: ocupan todo el espacio de su celda */
+    /* Tarjetas individuales dentro de la galería */
     #webrtcVideoStrip.gallery-mode #webrtcLocalCard,
     #webrtcVideoStrip.gallery-mode [id^="webrtcCard_"] {
       width: 100% !important;
       height: 100% !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
       max-width: 100% !important;
       max-height: 100% !important;
-      aspect-ratio: 16 / 9 !important;
-      border-radius: 14px !important;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4) !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+      border-radius: 12px !important;
+      position: relative !important;
       border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4) !important;
+      background-color: #111317 !important;
+      aspect-ratio: auto !important;
+      flex: 1 1 0% !important;
     }
-    #webrtcVideoStrip.gallery-mode #webrtcLocalNameTag,
-    #webrtcVideoStrip.gallery-mode [data-role="name"] {
-      font-size: 12px !important;
-      padding: 3px 8px !important;
-      border-radius: 6px !important;
-      bottom: 8px !important;
-      left: 8px !important;
-    }
-    #webrtcVideoStrip.gallery-mode #webrtcLocalAvatarInitial,
-    #webrtcVideoStrip.gallery-mode [data-role="placeholder"] .rounded-full {
-      width: 68px !important;
-      height: 68px !important;
-      font-size: 26px !important;
-      border-width: 2px !important;
+    /* Contenedores internos de video y placeholder/avatar estirados al 100% */
+    #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder,
+    #webrtcVideoStrip.gallery-mode [data-role="placeholder"] {
+      width: 100% !important;
+      height: 100% !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      flex: 1 1 0% !important;
     }
     #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder:not(.hidden),
     #webrtcVideoStrip.gallery-mode [data-role="placeholder"]:not(.hidden) {
-      width: 100% !important;
-      height: 100% !important;
       display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
     }
     #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder.hidden,
     #webrtcVideoStrip.gallery-mode [data-role="placeholder"].hidden {
       display: none !important;
     }
-    #webrtcVideoStrip.gallery-mode video:not(.hidden) {
+    #webrtcVideoStrip.gallery-mode video {
       width: 100% !important;
       height: 100% !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
       object-fit: cover !important;
+      flex: 1 1 0% !important;
+    }
+    #webrtcVideoStrip.gallery-mode video:not(.hidden) {
       display: block !important;
     }
     #webrtcVideoStrip.gallery-mode video.hidden {
       display: none !important;
+    }
+    /* Círculo de avatar grande y centrado */
+    #webrtcVideoStrip.gallery-mode #webrtcLocalAvatarInitial,
+    #webrtcVideoStrip.gallery-mode [data-role="placeholder"] .rounded-full {
+      width: 90px !important;
+      height: 90px !important;
+      font-size: 36px !important;
+      border-width: 3px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+    #webrtcVideoStrip.gallery-mode #webrtcLocalNameTag,
+    #webrtcVideoStrip.gallery-mode [data-role="name"] {
+      font-size: 13px !important;
+      padding: 4px 10px !important;
+      border-radius: 6px !important;
+      bottom: 12px !important;
+      left: 12px !important;
+      z-index: 20 !important;
     }
     #wbViewport, #wbCanvas {
       touch-action: none;
@@ -172,35 +204,40 @@
       }
       /* Modo Galería Zoom en pantallas móviles (max-width: 768px): tarjetas al 100% de ancho repartiendo el alto completo */
       #webrtcVideoStrip.gallery-mode {
-        padding: 8px !important;
+        padding: 0.75rem !important;
+        gap: 0.75rem !important;
       }
       #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody {
-        gap: 8px !important;
+        gap: 0.75rem !important;
+        grid-template-columns: 1fr !important;
+        grid-template-rows: repeat(2, 1fr) !important;
       }
-      /* 1 participante en móvil: 100% ancho y centrado */
-      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-1 {
+      #webrtcVideoStrip.gallery-mode #webrtcRemoteCards {
+        flex-direction: column !important;
+        gap: 0.75rem !important;
+      }
+      /* 1 participante en móvil: 100% ancho y alto */
+      #webrtcVideoStrip.gallery-mode.gallery-count-1 #webrtcStripExpandedBody {
         grid-template-columns: 1fr !important;
         grid-template-rows: 1fr !important;
       }
-      /* 2 participantes en móvil vertical: apilados verticalmente (100% ancho, 50%/50% alto completo) */
-      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-2 {
+      /* 2 participantes en móvil vertical: apilados al 100% ancho y 50%/50% alto */
+      #webrtcVideoStrip.gallery-mode.gallery-count-2 #webrtcStripExpandedBody {
         grid-template-columns: 1fr !important;
-        grid-template-rows: 1fr 1fr !important;
+        grid-template-rows: repeat(2, 1fr) !important;
       }
       /* 3 o 4 participantes en móvil: cuadrícula 2x2 */
-      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-3,
-      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-4 {
+      #webrtcVideoStrip.gallery-mode.gallery-count-3 #webrtcStripExpandedBody,
+      #webrtcVideoStrip.gallery-mode.gallery-count-4 #webrtcStripExpandedBody,
+      #webrtcVideoStrip.gallery-mode.gallery-count-many #webrtcStripExpandedBody {
         grid-template-columns: repeat(2, 1fr) !important;
         grid-template-rows: repeat(2, 1fr) !important;
       }
-      /* Tarjetas en móvil: ocupan todo el ancho y alto asignado por la fila de la cuadrícula */
-      #webrtcVideoStrip.gallery-mode #webrtcLocalCard,
-      #webrtcVideoStrip.gallery-mode [id^="webrtcCard_"] {
-        width: 100% !important;
-        height: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
-        aspect-ratio: auto !important;
+      #webrtcVideoStrip.gallery-mode #webrtcLocalAvatarInitial,
+      #webrtcVideoStrip.gallery-mode [data-role="placeholder"] .rounded-full {
+        width: 80px !important;
+        height: 80px !important;
+        font-size: 32px !important;
       }
     }
     /* Controles táctiles permanentes en móviles y dispositivos sin hover */
@@ -7127,21 +7164,28 @@
         const count = 1 + (remoteCards ? remoteCards.length : 0);
 
         expandedBody.classList.remove('gallery-count-1', 'gallery-count-2', 'gallery-count-3', 'gallery-count-4', 'gallery-count-many');
+        strip.classList.remove('gallery-count-1', 'gallery-count-2', 'gallery-count-3', 'gallery-count-4', 'gallery-count-many');
         if (count === 1) {
           expandedBody.classList.add('gallery-count-1');
+          strip.classList.add('gallery-count-1');
         } else if (count === 2) {
           expandedBody.classList.add('gallery-count-2');
+          strip.classList.add('gallery-count-2');
         } else if (count === 3) {
           expandedBody.classList.add('gallery-count-3');
+          strip.classList.add('gallery-count-3');
         } else if (count === 4) {
           expandedBody.classList.add('gallery-count-4');
+          strip.classList.add('gallery-count-4');
         } else {
           expandedBody.classList.add('gallery-count-many');
+          strip.classList.add('gallery-count-many');
         }
       } else {
         // MODO COMPACTO FLOTANTE: Hay lección, pizarra o screen share activo
         isGalleryModeActive = false;
         strip.classList.remove('gallery-mode');
+        strip.classList.remove('gallery-count-1', 'gallery-count-2', 'gallery-count-3', 'gallery-count-4', 'gallery-count-many');
         expandedBody.classList.remove('gallery-count-1', 'gallery-count-2', 'gallery-count-3', 'gallery-count-4', 'gallery-count-many');
 
         // Restaurar display de los contenedores según corresponda
