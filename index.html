@@ -25,16 +25,17 @@
     }
     /* Estilos del Modo Galería tipo Zoom (cuando no hay lección/pizarra/screen share) */
     #webrtcVideoStrip.gallery-mode {
-      position: absolute !important;
+      position: relative !important;
       inset: 0 !important;
       width: 100% !important;
       height: 100% !important;
+      flex: 1 1 0% !important;
       max-width: 100% !important;
       max-height: 100% !important;
-      bottom: 0 !important;
-      right: 0 !important;
-      left: 0 !important;
       top: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
       transform: none !important;
       border: 0 !important;
       border-radius: 0 !important;
@@ -63,6 +64,12 @@
     }
     #webrtcVideoStrip.gallery-mode #webrtcRemoteCards {
       display: contents !important;
+    }
+    #webrtcVideoStrip.gallery-mode [id^="webrtcCard_"] {
+      order: 1 !important;
+    }
+    #webrtcVideoStrip.gallery-mode #webrtcLocalCard {
+      order: 2 !important;
     }
     /* Cuadrícula Galería Zoom: 1 participante (centrado) */
     #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-1 {
@@ -118,6 +125,27 @@
       font-size: 26px !important;
       border-width: 2px !important;
     }
+    #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder:not(.hidden),
+    #webrtcVideoStrip.gallery-mode [data-role="placeholder"]:not(.hidden) {
+      width: 100% !important;
+      height: 100% !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+    #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder.hidden,
+    #webrtcVideoStrip.gallery-mode [data-role="placeholder"].hidden {
+      display: none !important;
+    }
+    #webrtcVideoStrip.gallery-mode video:not(.hidden) {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      display: block !important;
+    }
+    #webrtcVideoStrip.gallery-mode video.hidden {
+      display: none !important;
+    }
     #wbViewport, #wbCanvas {
       touch-action: none;
     }
@@ -132,11 +160,47 @@
         z-index: 70 !important;
         box-shadow: -4px 0 25px rgba(0, 0, 0, 0.6);
       }
+      #zmChatDockSlot.hidden,
+      #zmChatDockSlot[style*="display: none"] {
+        display: none !important;
+      }
       #zmChatDockResizeLeft {
         display: none !important;
       }
       #webrtcVideoStrip {
         max-width: 95% !important;
+      }
+      /* Modo Galería Zoom en pantallas móviles (max-width: 768px): tarjetas al 100% de ancho repartiendo el alto completo */
+      #webrtcVideoStrip.gallery-mode {
+        padding: 8px !important;
+      }
+      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody {
+        gap: 8px !important;
+      }
+      /* 1 participante en móvil: 100% ancho y centrado */
+      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-1 {
+        grid-template-columns: 1fr !important;
+        grid-template-rows: 1fr !important;
+      }
+      /* 2 participantes en móvil vertical: apilados verticalmente (100% ancho, 50%/50% alto completo) */
+      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-2 {
+        grid-template-columns: 1fr !important;
+        grid-template-rows: 1fr 1fr !important;
+      }
+      /* 3 o 4 participantes en móvil: cuadrícula 2x2 */
+      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-3,
+      #webrtcVideoStrip.gallery-mode #webrtcStripExpandedBody.gallery-count-4 {
+        grid-template-columns: repeat(2, 1fr) !important;
+        grid-template-rows: repeat(2, 1fr) !important;
+      }
+      /* Tarjetas en móvil: ocupan todo el ancho y alto asignado por la fila de la cuadrícula */
+      #webrtcVideoStrip.gallery-mode #webrtcLocalCard,
+      #webrtcVideoStrip.gallery-mode [id^="webrtcCard_"] {
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+        aspect-ratio: auto !important;
       }
     }
     /* Controles táctiles permanentes en móviles y dispositivos sin hover */
@@ -860,7 +924,7 @@
       </div>
 
       <!-- COLUMNA DERECHA: Panel Acoplado de Chat Estilo Zoom (de arriba a abajo hasta el borde inferior exacto de la pantalla) -->
-      <aside id="zmChatDockSlot" class="relative w-[325px] h-full flex-shrink-0 flex flex-col border-l border-[#2c2e33] bg-[#1a1a1a]">
+      <aside id="zmChatDockSlot" class="hidden relative w-[325px] h-full flex-shrink-0 flex flex-col border-l border-[#2c2e33] bg-[#1a1a1a]">
         <!-- Tirador izquierdo para redimensionar el ancho del panel acoplado -->
         <div id="zmChatDockResizeLeft" class="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-[#0e72ed]/60 z-40 transition-colors" title="Arrastra para ajustar el ancho del panel del chat"></div>
         <div id="zmChatWindow" class="relative w-full h-full flex flex-col bg-[#1a1a1a] text-[#e4e6eb] select-none overflow-hidden">
@@ -1116,6 +1180,8 @@
     let myChannel = null;
     let myName = "";
     let currentLoadedLessonId = null;
+    let hasLoadedLesson = false;
+    window.hasLoadedLesson = false;
     let assignedSlide = 1;
     let analyticsInterval = null;
     let studentFrame = document.getElementById('studentFrame');
@@ -1808,6 +1874,8 @@
       }
 
       currentLoadedLessonId = lessonId || Date.now().toString();
+      hasLoadedLesson = true;
+      window.hasLoadedLesson = true;
       latestPostMessageAnswers = [];
       waitingCover.classList.add('hidden');
       if (typeof syncVideoGalleryMode === 'function') syncVideoGalleryMode();
@@ -1970,6 +2038,12 @@
 
       if (typeof updateLocalMediaUI === 'function') updateLocalMediaUI();
 
+      // Asegurar inmediatamente la tarjeta de Profesor (Host) en #webrtcRemoteCards con avatar "P"
+      if (typeof ensureRemoteVideoCard === 'function') {
+        const hostPeerId = (window.__studentLatestPeerByKey && window.__studentLatestPeerByKey['__host__']) || 'host_presence';
+        ensureRemoteVideoCard(hostPeerId, 'Profesor (Host)', 'host');
+      }
+
       // Iniciar el motor de video asignado SOLO AHORA que el estudiante fue formalmente admitido
       if (typeof startStudentVideoEngine === 'function') {
         await startStudentVideoEngine(assignedVideoMode);
@@ -2003,6 +2077,16 @@
         event: 'WB_REQUEST_STATE',
         payload: { studentName: myName }
       });
+
+      // En dispositivos móviles (window.innerWidth <= 768), garantizar que el chat inicie cerrado
+      if (window.innerWidth <= 768) {
+        zmIsHidden = true;
+        zmIsMinimized = false;
+        zmIsFloating = false;
+      }
+      if (typeof updateChatLayoutMode === 'function') {
+        updateChatLayoutMode();
+      }
 
       if (typeof announceWebRTCPresence === 'function') {
         announceWebRTCPresence();
@@ -3995,11 +4079,15 @@
         zmChatWindow.style.height = '100%';
         zmChatWindow.style.zIndex = '';
         zmChatWindow.classList.add('hidden');
+        zmChatWindow.style.setProperty('display', 'none', 'important');
         zmChatDockSlot.classList.add('hidden');
+        zmChatDockSlot.style.setProperty('display', 'none', 'important');
         zmChatBody.classList.remove('hidden');
         return;
       }
 
+      zmChatDockSlot.style.removeProperty('display');
+      zmChatWindow.style.removeProperty('display');
       zmChatWindow.classList.remove('hidden');
       zmDockedWidthPx = Math.max(250, Math.min(680, Number(zmDockedWidthPx) || 325));
       zmFloatingWidth = Math.max(280, Math.min(window.innerWidth - 20, Number(zmFloatingWidth) || 345));
@@ -4259,6 +4347,14 @@
       zmResizeMode = null;
       zmResizeStartRect = null;
     });
+
+    // Inicializar visualización del chat (en móviles cerrado por defecto)
+    if (window.innerWidth <= 768) {
+      zmIsHidden = true;
+      zmIsMinimized = false;
+      zmIsFloating = false;
+    }
+    updateChatLayoutMode();
 
     function setChatTarget(target) {
       zmActiveTarget = target || 'EVERYONE';
@@ -5859,7 +5955,10 @@
         }
         const hasLiveVideo = (Boolean(peerObj.videoEnabled) || hasStreamLiveVideoTrack) && !peerObj.isSharingScreen;
         vidEl.classList.toggle('hidden', !hasLiveVideo);
-        if (phEl) phEl.classList.toggle('hidden', hasLiveVideo);
+        if (phEl) {
+          phEl.classList.toggle('hidden', hasLiveVideo);
+          phEl.style.display = hasLiveVideo ? 'none' : 'flex';
+        }
         if (hasLiveVideo) {
           vidEl.play().catch(() => {});
         }
@@ -6343,6 +6442,15 @@
         existingCard.id = `webrtcCard_${remotePeerId}`;
         existingCard.setAttribute('data-peer-id', remotePeerId);
         if (dedupKey) existingCard.setAttribute('data-student-name', dedupKey);
+        existingCard.setAttribute('data-peer-role', resolvedRole);
+
+        if (existingCard.parentElement !== remoteContainer) {
+          if (resolvedRole === 'host') {
+            remoteContainer.insertBefore(existingCard, remoteContainer.firstChild);
+          } else {
+            remoteContainer.appendChild(existingCard);
+          }
+        }
 
         const videoEl = existingCard.querySelector('video');
         if (videoEl) {
@@ -6350,7 +6458,22 @@
           videoEl.setAttribute('webkit-playsinline', '');
           videoEl.setAttribute('autoplay', '');
         }
-        const placeholderEl = existingCard.querySelector('[data-role="placeholder"]') || existingCard.querySelectorAll('div')[0];
+        let placeholderEl = existingCard.querySelector('[data-role="placeholder"]');
+        const initial = (resolvedName || 'P').trim().charAt(0).toUpperCase() || 'P';
+        const avatarColor = resolvedRole === 'host'
+          ? 'bg-emerald-600/30 border-emerald-400/40 text-emerald-200'
+          : 'bg-[#0e72ed]/30 border-[#0e72ed]/60 text-white';
+
+        if (!placeholderEl) {
+          placeholderEl = document.createElement('div');
+          placeholderEl.setAttribute('data-role', 'placeholder');
+          placeholderEl.className = 'flex flex-col items-center justify-center text-slate-400';
+          placeholderEl.innerHTML = `<div class="w-8 h-8 rounded-full ${avatarColor} border flex items-center justify-center font-bold text-xs mb-0.5">${initial}</div>`;
+          existingCard.appendChild(placeholderEl);
+        } else {
+          placeholderEl.innerHTML = `<div class="w-8 h-8 rounded-full ${avatarColor} border flex items-center justify-center font-bold text-xs mb-0.5">${initial}</div>`;
+        }
+
         const nameTagEl = existingCard.querySelector('[data-role="name"]') || existingCard.querySelectorAll('div')[2];
         const micIconEl = existingCard.querySelector('[data-role="mute"]') || existingCard.querySelectorAll('div')[3];
 
@@ -6409,10 +6532,8 @@
       card.appendChild(nameTag);
       card.appendChild(micIcon);
 
-      const expandedBody = document.getElementById('webrtcStripExpandedBody') || strip;
-      const localCard = document.getElementById('webrtcLocalCard');
       if (resolvedRole === 'host') {
-        expandedBody.insertBefore(card, localCard || expandedBody.firstChild);
+        remoteContainer.insertBefore(card, remoteContainer.firstChild);
       } else {
         remoteContainer.appendChild(card);
       }
@@ -6924,9 +7045,11 @@
     let isGalleryModeActive = false;
 
     function hasActiveSharedContent() {
-      // 1. Hay lección activa si waitingCover está oculto
-      const waitingCover = document.getElementById('waitingCover');
-      const hasLesson = Boolean(waitingCover && waitingCover.classList.contains('hidden'));
+      // 1. Hay lección interactiva .html realmente cargada (no simplemente que el iframe exista)
+      const hasLesson = Boolean(
+        (typeof hasLoadedLesson !== 'undefined' && hasLoadedLesson) ||
+        (typeof window.hasLoadedLesson !== 'undefined' && window.hasLoadedLesson)
+      );
 
       // 2. Hay Pizarra Colaborativa activa
       const hasWhiteboard = Boolean(typeof wbIsOpen !== 'undefined' && wbIsOpen);
@@ -6936,7 +7059,7 @@
       const hasScreenShare = Boolean(
         (typeof isSharingScreen !== 'undefined' && isSharingScreen) ||
         (typeof window.__remoteScreenSharingActive !== 'undefined' && window.__remoteScreenSharingActive) ||
-        (stageOverlay && !stageOverlay.classList.contains('hidden'))
+        (stageOverlay && !stageOverlay.classList.contains('hidden') && stageOverlay.style.display !== 'none')
       );
 
       return hasLesson || hasWhiteboard || hasScreenShare;
@@ -6945,8 +7068,11 @@
     function syncVideoGalleryMode() {
       const strip = document.getElementById('webrtcVideoStrip');
       const expandedBody = document.getElementById('webrtcStripExpandedBody');
-      const waitingCover = document.getElementById('waitingCover');
       const frameContainer = document.getElementById('studentFrameContainer');
+      const studentFrame = document.getElementById('studentFrame');
+      const lessonFrame = document.getElementById('lessonFrame');
+      const waitingCover = document.getElementById('waitingCover');
+      const whiteboardView = document.getElementById('whiteboardView');
       const workspaceCol = document.getElementById('leftWorkspaceColumn');
       if (!strip || !expandedBody) return;
 
@@ -6957,19 +7083,29 @@
         isGalleryModeActive = true;
         strip.classList.add('gallery-mode');
 
-        // Ocultar completamente el contenedor blanco didáctico y el waitingCover
-        if (frameContainer) frameContainer.style.display = 'none';
-        if (waitingCover) waitingCover.classList.add('hidden');
+        // Ocultar con !important todos los elementos del escenario didáctico blanco
+        if (frameContainer) frameContainer.style.setProperty('display', 'none', 'important');
+        if (studentFrame) studentFrame.style.setProperty('display', 'none', 'important');
+        if (lessonFrame) lessonFrame.style.setProperty('display', 'none', 'important');
+        if (waitingCover) waitingCover.style.setProperty('display', 'none', 'important');
+        if (whiteboardView) whiteboardView.style.setProperty('display', 'none', 'important');
+
         if (workspaceCol) {
           workspaceCol.classList.remove('bg-white');
           workspaceCol.classList.add('bg-[#0a0c10]');
+          workspaceCol.style.setProperty('background-color', '#0a0c10', 'important');
         }
 
-        // Limpiar posiciones inline de arrastre previo
-        strip.style.left = '';
+        // Limpiar cualquier propiedad inline de posición o dimensiones para que las reglas CSS tomen el control
+        ['top', 'left', 'right', 'bottom', 'width', 'height', 'transform', 'max-width', 'max-height'].forEach(prop => {
+          strip.style.removeProperty(prop);
+        });
         strip.style.top = '';
-        strip.style.bottom = '';
+        strip.style.left = '';
         strip.style.right = '';
+        strip.style.bottom = '';
+        strip.style.width = '';
+        strip.style.height = '';
         strip.style.transform = '';
 
         // Si estaba minimizado, restaurarlo en galería
@@ -6978,6 +7114,12 @@
           const minPill = document.getElementById('webrtcStripMinimizedPill');
           if (minPill) { minPill.classList.add('hidden'); minPill.classList.remove('flex'); }
           expandedBody.classList.remove('hidden');
+        }
+
+        // Asegurar que exista la tarjeta del Profesor (Host) en #webrtcRemoteCards con avatar "P"
+        if (typeof ensureRemoteVideoCard === 'function') {
+          const hostPeerId = (window.__studentLatestPeerByKey && window.__studentLatestPeerByKey['__host__']) || 'host_presence';
+          ensureRemoteVideoCard(hostPeerId, 'Profesor (Host)', 'host');
         }
 
         // Calcular cantidad de participantes visibles
@@ -7002,11 +7144,47 @@
         strip.classList.remove('gallery-mode');
         expandedBody.classList.remove('gallery-count-1', 'gallery-count-2', 'gallery-count-3', 'gallery-count-4', 'gallery-count-many');
 
-        // Restaurar visibilidad del contenedor de trabajo
-        if (frameContainer) frameContainer.style.display = '';
+        // Restaurar display de los contenedores según corresponda
+        if (frameContainer) {
+          frameContainer.style.removeProperty('display');
+          frameContainer.style.display = '';
+        }
+        if (studentFrame) {
+          studentFrame.style.removeProperty('display');
+          studentFrame.style.display = '';
+        }
+        if (lessonFrame) {
+          lessonFrame.style.removeProperty('display');
+          lessonFrame.style.display = '';
+        }
+
+        if (typeof wbIsOpen !== 'undefined' && wbIsOpen) {
+          if (whiteboardView) {
+            whiteboardView.style.removeProperty('display');
+            whiteboardView.classList.remove('hidden');
+          }
+        } else {
+          if (whiteboardView) {
+            whiteboardView.style.setProperty('display', 'none', 'important');
+            whiteboardView.classList.add('hidden');
+          }
+          if (hasLoadedLesson) {
+            if (waitingCover) {
+              waitingCover.style.setProperty('display', 'none', 'important');
+              waitingCover.classList.add('hidden');
+            }
+          } else {
+            if (waitingCover) {
+              waitingCover.style.removeProperty('display');
+              waitingCover.classList.remove('hidden');
+            }
+          }
+        }
+
         if (workspaceCol) {
           workspaceCol.classList.remove('bg-[#0a0c10]');
           workspaceCol.classList.add('bg-white');
+          workspaceCol.style.removeProperty('background-color');
         }
 
         // Restaurar posición flotante predeterminada si no tiene coordenadas personalizadas
@@ -7062,6 +7240,7 @@ window.setVideoStripMinimized = function(minimized) {
     };
 
     function clampVideoStripIntoBounds() {
+      if (isGalleryModeActive) return;
       const strip = document.getElementById('webrtcVideoStrip');
       const container = document.getElementById('leftWorkspaceColumn');
       if (!strip || !container) return;
@@ -7241,6 +7420,7 @@ window.setVideoStripMinimized = function(minimized) {
 
       // Posicionamiento adaptado para modo horizontal móvil (evita tapar la barra central de mandos)
       function applyLandscapePositionIfNeeded() {
+        if (isGalleryModeActive) return;
         const isLandscapeMobile = window.innerHeight <= 450 || (window.innerWidth <= 950 && window.innerHeight < window.innerWidth && window.innerHeight <= 480);
         if (isLandscapeMobile) {
           strip.style.top = '8px';
@@ -7254,6 +7434,7 @@ window.setVideoStripMinimized = function(minimized) {
 
       window.addEventListener('resize', () => {
         clampVideoStripIntoBounds();
+        if (typeof updateChatLayoutMode === 'function') updateChatLayoutMode();
       });
 
       window.addEventListener('orientationchange', () => {
