@@ -144,17 +144,28 @@
       display: none !important;
     }
     /* Placeholders con avatares centrados */
+    #webrtcLocalPlaceholder,
     #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder,
     #webrtcVideoStrip.gallery-mode [data-role="placeholder"] {
       position: absolute !important;
       inset: 0 !important;
+      top: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
       width: 100% !important;
       height: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
       display: flex !important;
       flex-direction: column !important;
       align-items: center !important;
       justify-content: center !important;
       background-color: #111317 !important;
+    }
+    #webrtcLocalVideo.hidden,
+    #webrtcVideoStrip.gallery-mode #webrtcLocalVideo.hidden {
+      display: none !important;
     }
     #webrtcVideoStrip.gallery-mode #webrtcLocalPlaceholder:not(.hidden),
     #webrtcVideoStrip.gallery-mode [data-role="placeholder"]:not(.hidden) {
@@ -285,7 +296,7 @@
       #cardToggleVideoBtn i {
         font-size: 13px !important;
       }
-      #webrtcLocalCard {
+      #webrtcVideoStrip:not(.gallery-mode) #webrtcLocalCard {
         min-width: 144px !important;
         min-height: 86px !important;
       }
@@ -307,7 +318,7 @@
         max-width: 48% !important;
         padding: 3px !important;
       }
-      #webrtcLocalCard {
+      #webrtcVideoStrip:not(.gallery-mode) #webrtcLocalCard {
         min-width: 120px !important;
         width: 120px !important;
         height: 72px !important;
@@ -550,7 +561,7 @@
             <!-- Miniatura Local (Estudiante) -->
             <div id="webrtcLocalCard" class="relative w-36 h-20 rounded-xl overflow-hidden bg-[#111317] border border-white/10 flex-shrink-0 flex items-center justify-center group">
               <video id="webrtcLocalVideo" autoplay playsinline webkit-playsinline muted class="absolute inset-0 w-full h-full object-cover transform scale-x-[-1] hidden"></video>
-              <div id="webrtcLocalPlaceholder" class="flex flex-col items-center justify-center text-slate-400">
+              <div id="webrtcLocalPlaceholder" class="absolute inset-0 w-full h-full flex flex-col items-center justify-center text-slate-400">
                 <div id="webrtcLocalAvatarInitial" class="w-8 h-8 rounded-full bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-xs font-bold text-indigo-200 mb-0.5">A</div>
               </div>
               <span id="webrtcLocalNameTag" class="absolute bottom-1 left-1.5 bg-black/65 backdrop-blur-xs text-white text-[10px] font-medium px-1.5 py-0.5 rounded leading-tight truncate max-w-[90%] z-10">Alumno</span>
@@ -2314,13 +2325,19 @@
             admitStudentToClass();
           }
         } else {
-          // Si ya estamos admitidos y entra un nuevo compañero en modo P2P, anunciar presencia tras un breve lapso
-          if (targetName && targetName !== currentName && currentVideoMode === 'p2p') {
-            setTimeout(() => {
-              if (typeof announceWebRTCPresence === 'function') {
-                announceWebRTCPresence();
-              }
-            }, 600);
+          // Si ya estamos admitidos y entra un nuevo compañero, asegurar su tarjeta de inmediato
+          if (targetName && targetName !== currentName) {
+            const peerId = payload.peerId || targetId || (typeof normalizeStudentPeerKey === 'function' ? normalizeStudentPeerKey(payload.studentName) : targetName);
+            if (peerId && typeof ensureRemoteVideoCard === 'function') {
+              ensureRemoteVideoCard(peerId, payload.studentName || 'Compañero', 'student');
+            }
+            if (currentVideoMode === 'p2p') {
+              setTimeout(() => {
+                if (typeof announceWebRTCPresence === 'function') {
+                  announceWebRTCPresence();
+                }
+              }, 600);
+            }
           }
         }
       });
@@ -7157,7 +7174,18 @@
       return hasLesson || hasWhiteboard || hasScreenShare;
     }
 
+    let __isSyncingGallery = false;
     function syncVideoGalleryMode() {
+      if (__isSyncingGallery) return;
+      __isSyncingGallery = true;
+      try {
+        _syncVideoGalleryModeInternal();
+      } finally {
+        __isSyncingGallery = false;
+      }
+    }
+
+    function _syncVideoGalleryModeInternal() {
       const strip = document.getElementById('webrtcVideoStrip');
       const expandedBody = document.getElementById('webrtcStripExpandedBody');
       const frameContainer = document.getElementById('studentFrameContainer');
@@ -7208,11 +7236,7 @@
           expandedBody.classList.remove('hidden');
         }
 
-        // Asegurar que exista la tarjeta del Profesor (Host) en #webrtcRemoteCards con avatar "P"
-        if (typeof ensureRemoteVideoCard === 'function') {
-          const hostPeerId = (window.__studentLatestPeerByKey && window.__studentLatestPeerByKey['__host__']) || 'host_presence';
-          ensureRemoteVideoCard(hostPeerId, 'Profesor (Host)', 'host');
-        }
+// Tarjeta del Host gestionada limpiamente fuera del bucle de layout
 
         // Calcular cantidad de participantes visibles
         const remoteCards = strip.querySelectorAll('[id^="webrtcCard_"]');
@@ -7312,9 +7336,6 @@
         labelEl.textContent = stuName;
         subLabelEl.textContent = 'Cámara minimizada';
         avatarEl.textContent = stuName.trim().charAt(0).toUpperCase() || 'A';
-      }
-      if (typeof syncVideoGalleryMode === 'function') {
-        syncVideoGalleryMode();
       }
     }
 window.setVideoStripMinimized = function(minimized) {
